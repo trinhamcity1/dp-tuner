@@ -1,0 +1,16 @@
+# Core scientific stack
+numpy>=1.23
+pandas>=1.5
+scikit-learn>=1.2
+matplotlib>=3.7
+
+# Differential privacy & ML
+torch>=2.0
+opacus>=1.3   # DP-SGD + privacy accountant
+
+# Synthetic data generators
+ctgan>=0.7
+sdv>=1.8
+
+# Optional utilities
+jupyter
