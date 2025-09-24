@@ -38,7 +38,7 @@ import random
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, List
-
+import argparse
 # Try to import optional libs; if not present, we use stubs.
 try:
     from sklearn.model_selection import train_test_split
@@ -50,6 +50,13 @@ try:
 except Exception as e:
     raise RuntimeError("Please install scikit-learn to run this demo: pip install scikit-learn") from e
 
+# Optional: SDV-based adapters (CTGAN/TVAE) — baseline non-DP generators
+# try:
+#     from generators import CtganGenerator, TvaeGenerator
+#     HAS_SDV = True
+# except Exception:
+#     HAS_SDV = False 
+    
 # Optional: CTGAN/TVAE (tabular generators)
 try:
     from ctgan import CTGAN
@@ -308,6 +315,13 @@ def run_tuner(
     return df
 
 # ========== 7) MAIN ============================================================================
+# def parse_args():
+#     parser = argparse.ArgumentParser(description='DP epsilon tuner demo')
+#     parser.add_argument('--generator', choices=['stub','ctgan','tvae'], default='stub', help='Which generator to use')
+#     parser.add_argument('--target-auroc', type=float, default=0.78, help='Target AUROC threshold τ')
+#     parser.add_argument('--out-dir', type=str, default='outputs', help='Output directory')
+#     return parser.parse_args()
+
 def main():
     # ---- Step 1: Load data & preprocess (collect N) ----
     raw = make_fake_healthcare(n=6000, seed=7)

@@ -3,3 +3,6 @@ venv/
 
 #Output folders
 outputs/
+
+#generators cache
+generators/__pycache__
