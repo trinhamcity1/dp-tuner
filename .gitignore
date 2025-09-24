@@ -1,3 +1,5 @@
 # Virtual envs
 venv/
 
+#Output folders
+outputs/

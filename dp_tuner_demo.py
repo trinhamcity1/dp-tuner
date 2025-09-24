@@ -127,7 +127,7 @@ def preprocess_and_split(df: pd.DataFrame, label: str = "readmit_30d", test_size
     pre = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), num_cols),
-            ("cat", OneHotEncoder(handle_unknown="ignore", sparse=False), cat_cols),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols),
         ]
     )
 
@@ -190,8 +190,11 @@ def epsilon_from_accountant(N: int, B: int, epochs: int, C: float, sigma: float,
         # Here we use the analytical RDP step for Gaussian mechanism with sampling rate q.
         for _ in range(T):
             acc.step(noise_multiplier=sigma, sample_rate=q)
-        eps, _ = acc.get_epsilon(delta=delta)
-        return float(eps)
+
+        # Opacus >= 1.3 returns a float; older versions may return (eps, best_alpha)
+        val = acc.get_epsilon(delta)
+        eps = float(val if isinstance(val, (int, float)) else val[0])
+        return eps
     else:
         # ---- Placeholder heuristic (for demo only!) -----------------------------------------
         # ε roughly decreases with larger σ; increases with T and q. This is NOT a real bound.
