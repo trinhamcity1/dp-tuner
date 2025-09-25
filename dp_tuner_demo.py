@@ -21,7 +21,7 @@ High-level steps (matching our research plan):
          4.1) Train DP generator (TVAE/CTGAN with DP-SGD)
          4.2) Ask privacy accountant for ε(N, B, T, C, σ, δ)
          4.3) Sample synthetic data
-         4.4) Train downstream classifier on synthetic, eval AUROC on REAL test
+         4.4) Train downstream classifier (logistic regression)
          4.5) Repeat across seeds; collect mean ± 95% CI
     5) Selection rule: pick smallest ε whose AUROC ≥ τ
     6) Output plots/tables & save results
@@ -38,7 +38,7 @@ import random
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, List
-import argparse
+
 # Try to import optional libs; if not present, we use stubs.
 try:
     from sklearn.model_selection import train_test_split
@@ -50,20 +50,14 @@ try:
 except Exception as e:
     raise RuntimeError("Please install scikit-learn to run this demo: pip install scikit-learn") from e
 
-# Optional: SDV-based adapters (CTGAN/TVAE) — baseline non-DP generators
-# try:
-#     from generators import CtganGenerator, TvaeGenerator
-#     HAS_SDV = True
-# except Exception:
-#     HAS_SDV = False 
-    
-# Optional: CTGAN/TVAE (tabular generators)
+# Use your SDV wrappers from generators/
 try:
-    from ctgan import CTGAN
-    from ctgan.sdv import TVAE
-    HAS_CTGAN = True
-except Exception:
-    HAS_CTGAN = False
+    from generators.sdv_ctgan import CtganGenerator
+    from generators.sdv_tvae import TvaeGenerator
+    HAS_SDV = True
+except Exception as e:
+    print(f"[WARN] SDV wrappers not available, using stub: {e}")
+    HAS_SDV = False
 
 # Optional: Opacus for DP-SGD accounting
 try:
@@ -123,43 +117,51 @@ def make_fake_healthcare(n: int = 5000, seed: int = 42) -> pd.DataFrame:
 
 # Preprocess into X, y and train/val/test splits; returns N (size of train)
 def preprocess_and_split(df: pd.DataFrame, label: str = "readmit_30d", test_size=0.15, val_size=0.15, seed=0):
-    y = df[label].values
-    X = df.drop(columns=[label])
+    """Return both raw splits and preprocessed matrices.
+    New keys in meta:
+        - preprocessor
+        - cat_cols, num_cols
+        - classes_
+        - label
+        - X_train_raw, X_val_raw, X_test_raw (pandas DataFrames with label column)
+    """
+    # First split on RAW for generator training
+    y_all = df[label].values
+    X_all = df.drop(columns=[label])
+    X_train_raw, X_temp_raw, y_train_raw, y_temp_raw = train_test_split(X_all, y_all, test_size=(test_size + val_size), random_state=seed, stratify=y_all)
+    rel_test = test_size / (test_size + val_size)
+    X_val_raw, X_test_raw, y_val_raw, y_test_raw = train_test_split(X_temp_raw, y_temp_raw, test_size=rel_test, random_state=seed, stratify=y_temp_raw)
 
-    # Identify column types
-    cat_cols = [c for c in X.columns if X[c].dtype == "object"]
-    num_cols = [c for c in X.columns if c not in cat_cols]
+    # Identify column types on RAW X
+    cat_cols = [c for c in X_all.columns if X_all[c].dtype == "object"]
+    num_cols = [c for c in X_all.columns if c not in cat_cols]
 
-    # Column transformer: one-hot for categoricals; scale numerics
     pre = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), num_cols),
             ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols),
         ]
     )
+    # Fit on train RAW features
+    pre.fit(X_train_raw)
 
-    # First split train+temp
-    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=(test_size + val_size), random_state=seed, stratify=y)
-    # Split temp into val/test
-    rel_test = test_size / (test_size + val_size)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=rel_test, random_state=seed, stratify=y_temp)
+    # Transform to matrices for downstream classifier
+    X_train_t = pre.transform(X_train_raw)
+    X_val_t   = pre.transform(X_val_raw)
+    X_test_t  = pre.transform(X_test_raw)
 
-    # Fit transformer on train, transform all
-    pre.fit(X_train)
-    X_train_t = pre.transform(X_train)
-    X_val_t = pre.transform(X_val)
-    X_test_t = pre.transform(X_test)
-
-    # N is size of training set after preprocessing
     N = X_train_t.shape[0]
-
     meta = {
         "preprocessor": pre,
         "cat_cols": cat_cols,
         "num_cols": num_cols,
-        "classes_": np.unique(y).tolist(),
+        "classes_": np.unique(y_all).tolist(),
+        "label": label,
+        "X_train_raw": X_train_raw.assign(**{label: y_train_raw}),
+        "X_val_raw": X_val_raw.assign(**{label: y_val_raw}),
+        "X_test_raw": X_test_raw.assign(**{label: y_test_raw}),
     }
-    return (X_train_t, y_train, X_val_t, y_val, X_test_t, y_test, N, meta)
+    return (X_train_t, y_train_raw, X_val_t, y_val_raw, X_test_t, y_test_raw, N, meta)
 
 # ========== 2) POLICY DEFAULTS (B, C, epochs, δ) ===============================================
 """
@@ -189,34 +191,27 @@ def epsilon_from_accountant(N: int, B: int, epochs: int, C: float, sigma: float,
     q = B / N  # sampling rate
 
     if HAS_OPACUS:
-        # Using Opacus' RDP accountant in a simplified way:
+        # Opacus version compatibility: some versions return float, some (eps, order)
         acc = RDPAccountant()
-        # We "simulate" T steps with Poisson subsampling. Opacus expects to be hooked into a trainer,
-        # but we'll approximate by manually stepping the accountant.
-        # NOTE: This is still a simplification; in a real trainer you'd let Opacus track per-step.
-        # Here we use the analytical RDP step for Gaussian mechanism with sampling rate q.
         for _ in range(T):
             acc.step(noise_multiplier=sigma, sample_rate=q)
 
-        # Opacus >= 1.3 returns a float; older versions may return (eps, best_alpha)
-        val = acc.get_epsilon(delta)
-        eps = float(val if isinstance(val, (int, float)) else val[0])
+        res = acc.get_epsilon(delta=delta)
+        # If it's a tuple/list, take the first item; else it's already a float
+        eps = float(res[0]) if isinstance(res, (tuple, list)) else float(res)
         return eps
     else:
         # ---- Placeholder heuristic (for demo only!) -----------------------------------------
-        # ε roughly decreases with larger σ; increases with T and q. This is NOT a real bound.
-        # Replace with a true accountant in your real code.
         T = compute_steps(N, B, epochs)
         q = B / N
         approx_eps = (q * math.sqrt(T)) / max(1e-6, sigma) * 2.0
-        # Adjust by delta magnitude (smaller delta -> slightly larger effective epsilon)
         approx_eps *= (1.0 + max(0.0, math.log(1.0 / max(delta, 1e-12))) / 100.0)
         return float(approx_eps)
 
 # ========== 4) GENERATORS (STUBS or REAL) ======================================================
 """
 We provide a stub "generator" so the script runs without ctgan/tvae.
-If ctgan is installed, you can switch to real CTGAN/TVAE training (without DP).
+If SDV (CTGAN/TVAE) is available, we switch to those for a strong NON-DP baseline.
 For real DP training, you'll need to implement DP-SGD inside the generator trainer.
 """
 
@@ -270,10 +265,21 @@ def run_tuner(
     seeds: List[int],
     target_auroc: float = 0.78,
     synth_size: int = None,
+    *,
+    gen_kind: str = "ctgan",
+    preprocessor: ColumnTransformer = None,
+    raw_train_df: pd.DataFrame = None,
+    label_col: str = "readmit_30d",
 ) -> pd.DataFrame:
+    """Run tuner using SDV CTGAN/TVAE as non-DP baselines.
+    We still compute ε from (N,B,epochs,C,σ,δ) for reporting, but the generator itself
+    is non-DP (baseline). Later you can plug in DP-enabled trainers with the same interface.
+    """
+    if preprocessor is None or raw_train_df is None:
+        raise ValueError("run_tuner now expects preprocessor and raw_train_df so it can train SDV models on RAW.")
     N = X_train.shape[0]
     if synth_size is None:
-        synth_size = N  # generate same number of synthetic samples
+        synth_size = N
 
     results = []
     for sigma in sigma_grid:
@@ -282,21 +288,57 @@ def run_tuner(
         # Collect AUROCs across seeds
         aurocs = []
         for s in seeds:
-            # STEP 4.1: "Train DP generator" (stubbed here)
-            gen = StubGenerator(input_dim=X_train.shape[1], sigma=sigma, clip=policy.C, epochs=policy.epochs, seed=s)
-            gen.fit(X_train)
+            # Choose generator
+            if HAS_SDV:
+                if gen_kind.lower() == "ctgan":
+                    gen = CtganGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
+                elif gen_kind.lower() == "tvae":
+                    gen = TvaeGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
+                else:
+                    raise ValueError(f"Unknown gen_kind: {gen_kind}")
+            else:
+                # Fallback to stub if SDV not available
+                gen = StubGenerator(input_dim=X_train.shape[1], sigma=sigma, clip=policy.C, epochs=policy.epochs, seed=s)
 
-            # STEP 4.3: Sample synthetic
-            X_syn = gen.sample(synth_size)
-            # For the stub, synth labels are built by a noisy projection of X_train->y_train correlation
-            # In real code, you'd sample (X,y) jointly from the learned tabular model.
-            # We'll hack labels by training a quick LR on real train, then label synthetic via that LR.
-            aux_clf = LogisticRegression(max_iter=1000)
-            aux_clf.fit(X_train, y_train)
-            y_prob_syn = aux_clf.predict_proba(X_syn)[:, 1]
-            y_syn = (y_prob_syn > 0.5).astype(int)
+            # Fit on RAW (DataFrame) including label column if supervised
+            if isinstance(raw_train_df, pd.DataFrame) and (label_col in raw_train_df.columns):
+                X_df = raw_train_df.drop(columns=[label_col])
+                y_series = raw_train_df[label_col]
+                gen.fit(X_df, y_series)
+            else:
+                # last resort: use matrix
+                gen.fit(pd.DataFrame(X_train), pd.Series(y_train))
 
-            # STEP 4.4: Train downstream model on synthetic, eval on REAL test
+            # Sample synthetic as RAW DataFrame
+            if hasattr(gen, "sample"):
+                syn_df = gen.sample(synth_size)
+            else:
+                # fallback stub
+                X_syn = gen.sample(synth_size)
+                aux_clf = LogisticRegression(max_iter=1000)
+                aux_clf.fit(X_train, y_train)
+                y_prob_syn = aux_clf.predict_proba(X_syn)[:, 1]
+                y_syn = (y_prob_syn > 0.5).astype(int)
+                auroc = downstream_auroc(X_syn, y_syn, X_test, y_test, seed=s)
+                aurocs.append(auroc)
+                continue
+
+            # Split X/y from synthetic RAW df
+            if label_col in syn_df.columns:
+                y_syn = syn_df[label_col].astype(int).to_numpy()
+                X_syn_raw = syn_df.drop(columns=[label_col])
+            else:
+                # if model didn't include label, create pseudo-labels using aux model
+                aux_clf = LogisticRegression(max_iter=1000)
+                aux_clf.fit(X_train, y_train)
+                y_prob_syn = aux_clf.predict_proba(preprocessor.transform(syn_df))[:, 1]
+                y_syn = (y_prob_syn > 0.5).astype(int)
+                X_syn_raw = syn_df
+
+            # Transform synthetic RAW X to feature matrix using the same preprocessor
+            X_syn = preprocessor.transform(X_syn_raw)
+
+            # Downstream evaluation
             auroc = downstream_auroc(X_syn, y_syn, X_test, y_test, seed=s)
             aurocs.append(auroc)
 
@@ -310,18 +352,10 @@ def run_tuner(
         })
 
     df = pd.DataFrame(results).sort_values(by="epsilon")
-    # Selection rule: smallest ε with AUROC ≥ target
     df["meets_target"] = df["auroc_mean"] >= target_auroc
     return df
 
 # ========== 7) MAIN ============================================================================
-# def parse_args():
-#     parser = argparse.ArgumentParser(description='DP epsilon tuner demo')
-#     parser.add_argument('--generator', choices=['stub','ctgan','tvae'], default='stub', help='Which generator to use')
-#     parser.add_argument('--target-auroc', type=float, default=0.78, help='Target AUROC threshold τ')
-#     parser.add_argument('--out-dir', type=str, default='outputs', help='Output directory')
-#     return parser.parse_args()
-
 def main():
     # ---- Step 1: Load data & preprocess (collect N) ----
     raw = make_fake_healthcare(n=6000, seed=7)
@@ -329,22 +363,26 @@ def main():
     print(f"[INFO] N (train size) = {N}")
 
     # ---- Step 2: Fix policy knobs (B, C, epochs, δ) ----
-    policy = Policy(B=128, C=1.0, epochs=50, delta=None)
+    policy = Policy(B=256, C=1.0, epochs=50, delta=None)
     delta = policy.delta or (1.0 / N)  # choose δ = 1/N if not provided
     print(f"[INFO] Policy: B={policy.B}, C={policy.C}, epochs={policy.epochs}, delta={delta:.2e}")
 
     # ---- Step 3: Define σ search space ----
     sigma_grid = [0.6, 0.9, 1.2, 1.6, 2.0]
-    seeds = [0, 1, 2]
+    seeds = [0, 1]  # keep short for demo; bump for more stable CI
     target_auroc = 0.78
 
-    # ---- Step 4–6: Run tuner ----
+    # ---- Step 4–6: Run tuner with SDV CTGAN baseline ----
     df = run_tuner(
         X_train=X_train, y_train=y_train,
         X_test=X_test, y_test=y_test,
         policy=policy, delta=delta,
         sigma_grid=sigma_grid, seeds=seeds,
         target_auroc=target_auroc, synth_size=N,
+        gen_kind="ctgan",
+        preprocessor=meta["preprocessor"],
+        raw_train_df=meta["X_train_raw"],
+        label_col=meta["label"],
     )
     print("\n[TUNER RESULTS] (sorted by epsilon)")
     print(df.to_string(index=False))
@@ -354,7 +392,6 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     df.to_csv(os.path.join(out_dir, "tuner_results.csv"), index=False)
 
-    # Persist a lightweight JSON summary
     summary = {
         "target_auroc": target_auroc,
         "best_row": df[df["meets_target"]].sort_values("epsilon").head(1).to_dict(orient="records")
