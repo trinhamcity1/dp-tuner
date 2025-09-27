@@ -63,6 +63,7 @@ except Exception as e:
 try:
     from opacus.accountants import RDPAccountant
     HAS_OPACUS = True
+    print("[HAS_OPACUS] has successfully imported")
 except Exception:
     HAS_OPACUS = False
 
@@ -199,6 +200,7 @@ def epsilon_from_accountant(N: int, B: int, epochs: int, C: float, sigma: float,
         res = acc.get_epsilon(delta=delta)
         # If it's a tuple/list, take the first item; else it's already a float
         eps = float(res[0]) if isinstance(res, (tuple, list)) else float(res)
+        print("[HAS_OPACUS] has been used")
         return eps
     else:
         # ---- Placeholder heuristic (for demo only!) -----------------------------------------
@@ -206,6 +208,7 @@ def epsilon_from_accountant(N: int, B: int, epochs: int, C: float, sigma: float,
         q = B / N
         approx_eps = (q * math.sqrt(T)) / max(1e-6, sigma) * 2.0
         approx_eps *= (1.0 + max(0.0, math.log(1.0 / max(delta, 1e-12))) / 100.0)
+        print("[heuristic] has been used")
         return float(approx_eps)
 
 # ========== 4) GENERATORS (STUBS or REAL) ======================================================
@@ -366,11 +369,18 @@ def main():
     policy = Policy(B=256, C=1.0, epochs=50, delta=None)
     delta = policy.delta or (1.0 / N)  # choose δ = 1/N if not provided
     print(f"[INFO] Policy: B={policy.B}, C={policy.C}, epochs={policy.epochs}, delta={delta:.2e}")
+    
+    # ---- Step 2.5: Compute baseline AUROC (upper bound) ----
+    real_clf = LogisticRegression(max_iter=1000)
+    real_clf.fit(X_train, y_train)
+    real_auc = roc_auc_score(y_test, real_clf.predict_proba(X_test)[:, 1])
+    target_auroc = 0.9 * real_auc
+    print(f"[BASELINE] Real-data AUROC = {real_auc:.3f}, target τ = {target_auroc:.3f}")
 
     # ---- Step 3: Define σ search space ----
     sigma_grid = [0.6, 0.9, 1.2, 1.6, 2.0]
     seeds = [0, 1]  # keep short for demo; bump for more stable CI
-    target_auroc = 0.78
+    # target_auroc = 0.78   #comment as step 2.5 determine the target_auroc
 
     # ---- Step 4–6: Run tuner with SDV CTGAN baseline ----
     df = run_tuner(
@@ -379,7 +389,7 @@ def main():
         policy=policy, delta=delta,
         sigma_grid=sigma_grid, seeds=seeds,
         target_auroc=target_auroc, synth_size=N,
-        gen_kind="ctgan",
+        gen_kind="tvae",
         preprocessor=meta["preprocessor"],
         raw_train_df=meta["X_train_raw"],
         label_col=meta["label"],
