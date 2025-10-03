@@ -38,6 +38,8 @@ import random
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, List
+from datetime import datetime
+
 
 # Try to import optional libs; if not present, we use stubs.
 try:
@@ -360,8 +362,24 @@ def run_tuner(
 
 # ========== 7) MAIN ============================================================================
 def main():
+    # --- Output toggles ---
+    write_gen_fake_data_to_local_output = True     # set to False to disable
+    write_synthetic_nondp_data_to_local_output = True  # set to False to disable
+
+    # --- Timestamp (DDMMYYYYHHMM) ---
+    ts = datetime.now().strftime("%d%m%Y%H%M")
+
     # ---- Step 1: Load data & preprocess (collect N) ----
     raw = make_fake_healthcare(n=6000, seed=7)
+
+    # Optionally write the generated "real" (fake) dataset
+    if write_gen_fake_data_to_local_output:
+        out_dir_fake = os.path.join("outputs", "generated_health_data")
+        os.makedirs(out_dir_fake, exist_ok=True)
+        fake_path = os.path.join(out_dir_fake, f"health_{ts}.csv")
+        raw.to_csv(fake_path, index=False)
+        print(f"[WRITE] Saved generated health data -> {fake_path}")
+
     X_train, y_train, X_val, y_val, X_test, y_test, N, meta = preprocess_and_split(raw, label="readmit_30d", seed=7)
     print(f"[INFO] N (train size) = {N}")
 
@@ -411,6 +429,52 @@ def main():
 
     print("\n[SUMMARY]")
     print(json.dumps(summary, indent=2))
+    
+    # ---- Pick best row and optionally write synthetic (non-DP) data ----
+    # Choose the smallest epsilon that meets the target; if none, fall back to highest AUROC
+    df_ok = df[df["meets_target"]].sort_values("epsilon")
+    if len(df_ok) > 0:
+        best = df_ok.iloc[0].to_dict()
+    else:
+        best = df.sort_values("auroc_mean", ascending=False).iloc[0].to_dict()
+        print("[WARN] No sigma met target AUROC; exporting synthetic for the best AUROC instead.")
+
+    # Only export synthetic if toggled on
+    if write_synthetic_nondp_data_to_local_output:
+        # Re-train the chosen generator once on RAW train split and sample N rows
+        label_col = meta["label"]
+        X_df = meta["X_train_raw"].drop(columns=[label_col])
+        y_series = meta["X_train_raw"][label_col]
+        synth_size = X_train.shape[0]
+
+        # Use same gen_kind you used in run_tuner; change here if you want to export the other model
+        chosen_gen_kind = "tvae"  # or "ctgan" — match what you ran above
+
+        if HAS_SDV:
+            if chosen_gen_kind == "ctgan":
+                # pac=16 only matters for CTGAN; keep it aligned with your batch size
+                from generators.sdv_ctgan import CtganGenerator
+                gen = CtganGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col, pac=16)
+            else:
+                from generators.sdv_tvae import TvaeGenerator
+                gen = TvaeGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
+        else:
+            # Fallback (shouldn't happen now, but safe)
+            print("[WARN] SDV wrappers not available; falling back to stub synthetic matrix.")
+            gen = StubGenerator(input_dim=X_train.shape[1], sigma=best["sigma"], clip=policy.C, epochs=policy.epochs, seed=0)
+
+        # Fit & sample synthetic RAW DataFrame (or matrix for stub)
+        gen.fit(X_df, y_series)
+        syn_df = gen.sample(synth_size)
+        if not isinstance(syn_df, pd.DataFrame):
+            # If it's matrix (stub), create a DF with generic columns + inferred labels via aux model
+            syn_df = pd.DataFrame(syn_df, columns=[f"x{i}" for i in range(syn_df.shape[1])])
+
+        out_dir_syn = os.path.join("outputs", "synthetic_non_dp_data")
+        os.makedirs(out_dir_syn, exist_ok=True)
+        syn_path = os.path.join(out_dir_syn, f"synth_{chosen_gen_kind}_{ts}.csv")
+        syn_df.to_csv(syn_path, index=False)
+        print(f"[WRITE] Saved synthetic ({chosen_gen_kind}) data -> {syn_path}")
 
 if __name__ == "__main__":
     main()
