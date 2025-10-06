@@ -3,7 +3,7 @@ A research framework for exploring the privacy–utility tradeoff in differentia
 
 This project automatically tunes the privacy budget (ε) in synthetic data generators (CTGAN, TVAE) and finds the smallest ε that preserves downstream utility. Once tuned, the framework can generate synthetic data at the chosen privacy level.
 
-✨ Features
+Features
 - Auto-tuner for ε: searches over DP noise multipliers (σ) and uses Opacus RDP accountant to compute ε.
 - Synthetic data generators: supports CTGAN and TVAE baselines (DP-SGD integration planned).
 - Utility evaluation: trains downstream classifiers on synthetic data and evaluates AUROC on real test sets.
