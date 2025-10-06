@@ -1,5 +1,5 @@
 # DP Epsilon Tuner
-🚀 A research framework for exploring the privacy–utility tradeoff in differential privacy.
+A research framework for exploring the privacy–utility tradeoff in differential privacy.
 
 This project automatically tunes the privacy budget (ε) in synthetic data generators (CTGAN, TVAE) and finds the smallest ε that preserves downstream utility. Once tuned, the framework can generate synthetic data at the chosen privacy level.
 
@@ -10,7 +10,7 @@ This project automatically tunes the privacy budget (ε) in synthetic data gener
 - Privacy probes: optional membership-inference risk checks (planned).
 - Compliance-ready: results can be mapped to HIPAA de-identification and regulatory reporting.
 
-📊 Research Problem
+Research Problem
 Hospitals and AI centers struggle to select a differential privacy budget (ε) when training models with private patient data.
 
 - Too small ε → strong privacy but poor utility.
@@ -26,7 +26,7 @@ where τ is defined relative to a baseline model (e.g., 90% of real-data AUROC).
 
 ---
 
-## ⚙️ Installation
+## Installation
 
 Clone the repo:
 ```bash
