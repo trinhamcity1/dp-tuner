@@ -30,5 +30,5 @@ where τ is defined relative to a baseline model (e.g., 90% of real-data AUROC).
 
 Clone the repo:
 ```bash
-git clone https://github.com/your-username/dp-epsilon-tuner.git
+git clone https://github.com/trinhamcity1/dp-epsilon-tuner.git
 cd dp-epsilon-tuner
