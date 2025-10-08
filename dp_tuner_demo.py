@@ -299,6 +299,14 @@ def run_tuner(
                     gen = CtganGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
                 elif gen_kind.lower() == "tvae":
                     gen = TvaeGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
+                elif gen_kind == "dp_tvae":
+                    from dp_synth_data_gen.dptvae import DPTVAE
+                    gen = DPTVAE(epochs=policy.epochs, batch_size=policy.B,
+                                max_grad_norm=policy.C, noise_multiplier=sigma)
+                elif gen_kind == "dp_ctgan":
+                    from dp_synth_data_gen.dpctgan import DPCTGAN
+                    gen = DPCTGAN(epochs=policy.epochs, batch_size=policy.B,
+                                max_grad_norm=policy.C, noise_multiplier=sigma, pac=16)
                 else:
                     raise ValueError(f"Unknown gen_kind: {gen_kind}")
             else:
@@ -429,7 +437,7 @@ def main():
 
     print("\n[SUMMARY]")
     print(json.dumps(summary, indent=2))
-    
+
     # ---- Pick best row and optionally write synthetic (non-DP) data ----
     # Choose the smallest epsilon that meets the target; if none, fall back to highest AUROC
     df_ok = df[df["meets_target"]].sort_values("epsilon")
