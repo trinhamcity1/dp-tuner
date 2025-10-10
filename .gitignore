@@ -6,3 +6,6 @@ outputs/
 
 #generators cache
 generators/__pycache__
+
+#dp_synth_data_ge cache
+__pycache__
