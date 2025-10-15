@@ -265,14 +265,17 @@ def run_tuner(
             # Choose generator
             if HAS_SDV and gen_kind.lower() in {"ctgan", "tvae"}:
                 if gen_kind.lower() == "ctgan":
+                    print("The selected generator is " + gen_kind) # Add logging
                     gen = CtganGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
                 else:
                     gen = TvaeGenerator(epochs=policy.epochs, batch_size=policy.B, verbose=False, label_col=label_col)
             elif gen_kind == "dp_tvae":
+                print("The selected generator is " + gen_kind) # Add logging
                 from dp_synth_data_gen.dptvae import DPTVAE
                 gen = DPTVAE(epochs=policy.epochs, batch_size=policy.B,
                              max_grad_norm=policy.C, noise_multiplier=sigma)
             elif gen_kind == "dp_ctgan":
+                print("The selected generator is " + gen_kind) # Add logging
                 from dp_synth_data_gen.dpctgan import DPCTGAN
                 gen = DPCTGAN(epochs=policy.epochs, batch_size=policy.B,
                               max_grad_norm=policy.C, noise_multiplier=sigma, pac=16)
@@ -298,6 +301,7 @@ def run_tuner(
 
             # ---- Sampling branch ----
             if gen_kind == "dp_ctgan":
+                print("The selected generator is " + gen_kind + "now entering sampling stage")
                 # Build a stratified label request with at least 1 sample per class
                 classes, counts = np.unique(y_train, return_counts=True)
                 probs = counts / counts.sum()
@@ -378,10 +382,10 @@ def run_tuner(
     return df
 
 # ========== 7) MAIN ============================================================================
-def main():
+def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind):
     # --- Output toggles ---
-    write_gen_fake_data_to_local_output = True     # set to False to disable
-    write_synthetic_nondp_data_to_local_output = True  # set to False to disable
+    write_gen_fake_data_to_local_output = False     # set to False to disable
+    write_synthetic_nondp_data_to_local_output = False  # set to False to disable
 
     # --- Timestamp (DDMMYYYYHHMM) ---
     ts = datetime.now().strftime("%d%m%Y%H%M")
@@ -401,7 +405,7 @@ def main():
     print(f"[INFO] N (train size) = {N}")
 
     # ---- Step 2: Fix policy knobs (B, C, epochs, δ) ----
-    policy = Policy(B=256, C=1.0, epochs=50, delta=None)
+    policy = Policy(B=b, C=c, epochs=epochs, delta=None)
     delta = policy.delta or (1.0 / N)  # choose δ = 1/N if not provided
     print(f"[INFO] Policy: B={policy.B}, C={policy.C}, epochs={policy.epochs}, delta={delta:.2e}")
     
@@ -413,8 +417,9 @@ def main():
     print(f"[BASELINE] Real-data AUROC = {real_auc:.3f}, target τ = {target_auroc:.3f}")
 
     # ---- Step 3: Define σ search space ----
-    sigma_grid = [0.6, 0.9, 1.2, 1.6, 2.0]
-    seeds = [0, 1]  # keep short for demo; bump for more stable CI
+    # sigma_grid = [0.6, 0.9, 1.2, 1.6, 2.0]
+    # sigma_grid = [1.6, 1.8, 2.0]
+    # seeds = [0, 1]  # keep short for demo; bump for more stable CI
 
     # ---- Step 4–6: Run tuner (using DP-CTGAN path or SDV) ----
     df = run_tuner(
@@ -423,7 +428,7 @@ def main():
         policy=policy, delta=delta,
         sigma_grid=sigma_grid, seeds=seeds,
         target_auroc=target_auroc, synth_size=N,
-        gen_kind="dp_ctgan",  # <- DP-CTGAN path with conditional sampling
+        gen_kind=gen_kind,  # <- DP-CTGAN path with conditional sampling
         preprocessor=meta["preprocessor"],
         raw_train_df=meta["X_train_raw"],
         label_col=meta["label"],
@@ -460,8 +465,7 @@ def main():
         X_df = meta["X_train_raw"].drop(columns=[label_col])
         y_series = meta["X_train_raw"][label_col]
         synth_size = X_train.shape[0]
-
-        chosen_gen_kind = "tvae"  # or "ctgan" — match what you ran above
+        chosen_gen_kind = "ctgan"  # or "ctgan" — match what you ran above
 
         if HAS_SDV:
             if chosen_gen_kind == "ctgan":
