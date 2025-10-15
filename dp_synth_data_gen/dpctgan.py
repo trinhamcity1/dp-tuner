@@ -9,6 +9,19 @@ from torch.utils.data import DataLoader, TensorDataset
 from opacus import PrivacyEngine
 
 def _mlp(d_in: int, d_out: int, widths: Tuple[int, int] = (256, 128)) -> nn.Sequential:
+    """
+    _mlp constructs a simple MLP stack.
+
+
+    Args:
+    d_in: Input feature dimension.
+    d_out: Output feature dimension.
+    widths: Hidden layer widths (tuple).
+
+
+    Returns:
+    torch.nn.Sequential with Linear+LeakyReLU blocks ending in Linear(d_out).
+    """
     layers: List[nn.Module] = []
     last = d_in
     for w in widths:
@@ -19,24 +32,83 @@ def _mlp(d_in: int, d_out: int, widths: Tuple[int, int] = (256, 128)) -> nn.Sequ
 
 class _Gen(nn.Module):
     def __init__(self, z_dim: int, d_cond: int, d_out: int):
+        """
+        Initialize the Generator network.
+
+
+        Args:
+        z_dim: Dimension of Gaussian noise input z.
+        d_cond: Dimension of condition vector (0 if no conditioning).
+        d_out: Dimension of generated feature vector (matching transformed X).
+        """
         super().__init__()
         self.net = _mlp(z_dim + d_cond, d_out, widths=(256, 256))
     def forward(self, z: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for Generator.
+
+
+        Args:
+        z: (batch, z_dim) noise tensor.
+        C: (batch, d_cond) condition tensor (zeros if no conditioning).
+
+
+        Returns:
+        (batch, d_out) generated features in transformed space.
+        """
         return self.net(torch.cat([z, C], dim=1))
 
 class _Disc(nn.Module):
     def __init__(self, d_in: int, d_cond: int):
+        """
+        Initialize the Discriminator network.
+
+
+        Args:
+        d_in: Dimension of input features (transformed X).
+        d_cond: Dimension of condition vector.
+        """
         super().__init__()
         self.net = _mlp(d_in + d_cond, 1, widths=(256, 128))
     def forward(self, x: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for Discriminator.
+
+
+        Args:
+        x: (batch, d_in) real or generated features.
+        C: (batch, d_cond) condition tensor.
+
+
+        Returns:
+        (batch, 1) logits for real/fake classification.
+        """
         return self.net(torch.cat([x, C], dim=1)).flatten()
 
 class DPCTGAN:
     """
-    DP-CTGAN (minimal):
-      - Auto one-hot for categoricals; numerics passthrough
-      - D trained with Opacus (DP-SGD); G trained vs vanilla shadow D
-      - PacGAN forced to 1
+    Differentially-Private CTGAN (DP-CTGAN)
+
+
+    Purpose:
+    Train a tabular GAN where the Discriminator (D) is optimized with DP‑SGD
+    via Opacus to provide (ε, δ)-differential privacy guarantees; the
+    Generator (G) is trained against a shadow (non-DP) D to preserve
+    post‑processing immunity.
+
+
+    Key behaviors:
+    • Auto schema inference (numeric vs categorical) + simple transformer:
+    numerics → median-impute passthrough; categoricals → one-hot.
+    • Optional label conditioning: if y is provided, the model builds a
+    condition vector used by both G and D, enabling class‑conditional
+    synthesis and prior-matched sampling at generation time.
+    • PacGAN is forced to 1 to ensure per‑sample gradients for Opacus.
+
+
+    This class intentionally keeps the architecture minimal and focuses on
+    privacy wiring and a clear, reproducible training loop. Functionality is
+    identical to the original version; this rewrite only adds documentation.
     """
     def __init__(
         self,
@@ -54,6 +126,34 @@ class DPCTGAN:
         pac: int = 1,
         **kwargs,
     ):
+        """
+        Construct a DP‑CTGAN trainer with minimal defaults.
+
+
+        Training configuration:
+        epochs: Number of full passes over the (transformed) dataset.
+        batch_size: Minibatch size for both D and G steps.
+
+
+        Differential privacy (Opacus) arguments:
+        max_grad_norm: Per-sample gradient clip norm for DP‑SGD on D.
+        noise_multiplier: Gaussian noise multiplier σ; higher means stronger privacy.
+        delta: Target δ for (ε, δ)-DP accounting.
+
+
+        Optimizers:
+        lr_g: Adam learning rate for Generator.
+        lr_d: Adam learning rate for Discriminator.
+
+
+        Architecture:
+        z_dim: Noise dimensionality fed to G.
+
+
+        Misc:
+        device: 'auto' → CUDA if available, else CPU.
+        verbose: If True, prints periodic losses/progress.
+        """
         self.epochs = epochs
         self.batch_size = batch_size
         self.max_grad_norm = max_grad_norm
@@ -87,12 +187,27 @@ class DPCTGAN:
 
     # ---- schema helpers ----
     def _remember_columns(self, X):
+        """
+        Record original column order from input DataFrame.
+
+
+        Args:
+        X: pandas DataFrame used to fit the model.
+        """
         if isinstance(X, pd.DataFrame):
             self._orig_columns = list(X.columns)
         else:
             self._orig_columns = [f"x{i}" for i in range(X.shape[1])]
 
     def _infer_schema(self, X_df: pd.DataFrame):
+        """
+        Infer basic schema: which columns are numeric vs categorical,
+        and collect unique category values for categorical columns.
+
+
+        Args:
+        X_df: pandas DataFrame with original (untransformed) features.
+        """
         self._num_cols, self._cat_cols = [], []
         for c in X_df.columns:
             dt = X_df[c].dtype
@@ -111,6 +226,18 @@ class DPCTGAN:
             self._cat_values[c] = cats
 
     def _fit_transform_X(self, X) -> np.ndarray:
+        """
+        Fit the simple transformer on X and return the transformed matrix.
+
+
+        Behavior:
+        • Non-categoricals → numeric, NA filled with column median (float32).
+        • Categoricals → one-hot encoded, with an explicit 'NA_CAT' bucket.
+
+
+        Returns:
+        np.ndarray of shape (n_rows, d_in) used to train the GAN.
+        """
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X, columns=self._orig_columns)
         Xc = X.copy()
@@ -149,6 +276,18 @@ class DPCTGAN:
         return M.astype(np.float32)
 
     def _inverse_transform(self, M: np.ndarray) -> pd.DataFrame:
+        """
+        Inverse the simple transform to reconstruct a DataFrame from a
+        generated feature matrix.
+
+
+        Args:
+        M: (n_rows, d_in) matrix in transformed space (output of G).
+
+
+        Returns:
+        pandas DataFrame with original columns and dtypes restored best‑effort.
+        """
         out: Dict[str, np.ndarray | List[str]] = {}
         if "__NUM__" in self._feature_slices:
             sl = self._feature_slices["__NUM__"]
@@ -167,6 +306,22 @@ class DPCTGAN:
 
     # ---- condition vector / label handling ----
     def _cond_vec(self, y: Optional[pd.Series], n: int) -> np.ndarray:
+        """
+        Build condition matrix from labels (if provided).
+
+
+        Args:
+        y: Optional pandas Series of labels; if None, no conditioning.
+        n: Number of rows (should match transformed X).
+
+
+        Side effects:
+        Sets _has_y, _y_classes (unique label order), and _y_probs (empirical prior).
+
+
+        Returns:
+        One-hot condition matrix of shape (n, d_cond) or zeros if no labels.
+        """
         if y is None:
             self._d_cond = 0
             self._has_y = False   # NEW
@@ -199,6 +354,22 @@ class DPCTGAN:
 
     # ---- training ----
     def fit(self, X, y: Optional[pd.Series] = None):
+        """
+        Fit the DP‑CTGAN model on tabular data X (and optional labels y).
+
+
+        High-level steps:
+        1) Remember columns; infer schema; fit+transform X → X_mat.
+        2) Build condition matrix C_mat from y.
+        3) Initialize G and D; wrap D with Opacus PrivacyEngine for DP‑SGD.
+        4) For each epoch: do n_critic DP updates of D, then one G update against
+        a shadow (non‑DP) copy of D to preserve post‑processing immunity.
+        5) Save fitted modules and schema metadata for sampling.
+
+
+        Notes:
+        • This implementation adds only documentation; functionality is unchanged.
+        """
         if isinstance(X, pd.DataFrame):
             X_df = X
         else:
@@ -284,7 +455,17 @@ class DPCTGAN:
 
     # ---- sampling ----
     def _draw_cond_indices(self, n: int) -> np.ndarray:
-        """Draw class indices using empirical distribution (or uniform if missing)."""
+        """
+        Draw condition indices according to empirical label prior.
+
+
+        Args:
+        n: Number of indices to sample.
+
+
+        Returns:
+        np.ndarray of length n with integer indices in [0, d_cond).
+        """
         if not self._has_y or self._d_cond == 0:
             return np.zeros(n, dtype=int)
         probs = self._y_probs if self._y_probs is not None else np.ones(self._d_cond) / self._d_cond
@@ -294,6 +475,16 @@ class DPCTGAN:
         """
         Sample n rows. If y_cond is provided (array-like of length n), condition on those labels.
         If not provided but model was trained with labels, draws from empirical class distribution.
+
+
+        Args:
+        n: Number of rows to sample.
+        return_y: If True and labels were modeled, also return sampled labels.
+        y_cond: Optional array of labels to condition on for each row.
+
+
+        Returns:
+        DataFrame (and optionally label array) in the original schema.
         """
         assert self._fitted, "Call fit() before sample()."
         self._G.eval()
