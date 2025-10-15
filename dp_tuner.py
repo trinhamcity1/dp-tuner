@@ -382,7 +382,7 @@ def run_tuner(
     return df
 
 # ========== 7) MAIN ============================================================================
-def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind):
+def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind,external_data_source,external_data_path):
     # --- Output toggles ---
     write_gen_fake_data_to_local_output = False     # set to False to disable
     write_synthetic_nondp_data_to_local_output = False  # set to False to disable
@@ -391,7 +391,10 @@ def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind):
     ts = datetime.now().strftime("%d%m%Y%H%M")
 
     # ---- Step 1: Load data & preprocess (collect N) ----
-    raw = make_fake_healthcare(n=6000, seed=7)
+    if external_data_source == False:
+        raw = make_fake_healthcare(n=6000, seed=7)
+    else:
+        raw = df = pd.read_csv(external_data_path)
 
     # Optionally write the generated "real" (fake) dataset
     if write_gen_fake_data_to_local_output:
