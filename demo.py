@@ -10,6 +10,7 @@ if __name__ == "__main__":
         sigma_grid=[1.6, 1.8, 2.0],
         seeds=[0, 1],
         gen_kind="dp_ctgan",
-        external_data_source=False,
-        external_data_path="raw_data\MIMIC_IV_Trasncript.csv"
+        external_data_source=True,
+        external_data_path="raw_data\diabetes_012_health_indicators_BRFSS2021.csv",
+        label_col = "Diabetes_012"
         )

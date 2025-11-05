@@ -118,6 +118,8 @@ def preprocess_and_split(df: pd.DataFrame, label: str = "readmit_30d", test_size
         - X_train_raw, X_val_raw, X_test_raw (pandas DataFrames with label column)
     """
     # First split on RAW for generator training
+    print("label variable is now" + label)
+    print(df.columns)
     y_all = df[label].values
     X_all = df.drop(columns=[label])
     X_train_raw, X_temp_raw, y_train_raw, y_temp_raw = train_test_split(
@@ -128,6 +130,7 @@ def preprocess_and_split(df: pd.DataFrame, label: str = "readmit_30d", test_size
         X_temp_raw, y_temp_raw, test_size=rel_test, random_state=seed, stratify=y_temp_raw
     )
 
+    print("Now Identifying column types on RAW X")
     # Identify column types on RAW X
     cat_cols = [c for c in X_all.columns if X_all[c].dtype == "object"]
     num_cols = [c for c in X_all.columns if c not in cat_cols]
@@ -224,10 +227,17 @@ class StubGenerator:
 # ========== 5) DOWNSTREAM TASK (UTILITY EVALUATION) ============================================
 def downstream_auroc(X_syn: np.ndarray, y_syn: np.ndarray, X_test: np.ndarray, y_test: np.ndarray, seed=0) -> float:
     set_seed(seed)
-    clf = LogisticRegression(max_iter=1000, n_jobs=None)
+    clf = LogisticRegression(max_iter=1000)
     clf.fit(X_syn, y_syn)
-    y_prob = clf.predict_proba(X_test)[:, 1]
-    return float(roc_auc_score(y_test, y_prob))
+    #Multiclass aware version
+    unique_classes = np.unique(y_test)
+    y_proba = clf.predict_proba(X_test)
+
+    if len(unique_classes) > 2:
+        # Multiclass One-vs-Rest macro AUROC
+        return float(roc_auc_score(y_test, y_proba, multi_class="ovr", average="macro"))
+    else:
+        return float(roc_auc_score(y_test, y_proba[:, 1]))
 
 # ========== 6) TUNER LOOP ======================================================================
 def run_tuner(
@@ -382,7 +392,18 @@ def run_tuner(
     return df
 
 # ========== 7) MAIN ============================================================================
-def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind,external_data_source,external_data_path):
+def main(
+        b,
+        c,
+        epochs,
+        delta,
+        sigma_grid,
+        seeds,
+        gen_kind,
+        external_data_source,
+        external_data_path,
+        label_col,
+        ):
     # --- Output toggles ---
     write_gen_fake_data_to_local_output = False     # set to False to disable
     write_synthetic_nondp_data_to_local_output = False  # set to False to disable
@@ -404,7 +425,7 @@ def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind,external_data_source,externa
         raw.to_csv(fake_path, index=False)
         print(f"[WRITE] Saved generated health data -> {fake_path}")
 
-    X_train, y_train, X_val, y_val, X_test, y_test, N, meta = preprocess_and_split(raw, label="readmit_30d", seed=7)
+    X_train, y_train, X_val, y_val, X_test, y_test, N, meta = preprocess_and_split(raw, label=label_col, seed=7)
     print(f"[INFO] N (train size) = {N}")
 
     # ---- Step 2: Fix policy knobs (B, C, epochs, δ) ----
@@ -415,7 +436,18 @@ def main(b,c,epochs,delta,sigma_grid,seeds,gen_kind,external_data_source,externa
     # ---- Step 2.5: Compute baseline AUROC (upper bound) ----
     real_clf = LogisticRegression(max_iter=1000)
     real_clf.fit(X_train, y_train)
-    real_auc = roc_auc_score(y_test, real_clf.predict_proba(X_test)[:, 1])
+
+    # real_auc = roc_auc_score(y_test, real_clf.predict_proba(X_test)[:, 1])
+    # target_auroc = 0.9 * real_auc
+    # print(f"[BASELINE] Real-data AUROC = {real_auc:.3f}, target τ = {target_auroc:.3f}")
+    unique_classes = np.unique(y_test)
+    if len(unique_classes) > 2:
+        # Multiclass AUC (macro One-vs-Rest)
+        y_proba = real_clf.predict_proba(X_test)
+        real_auc = roc_auc_score(y_test, y_proba, multi_class="ovr", average="macro")
+    else:
+        real_auc = roc_auc_score(y_test, real_clf.predict_proba(X_test)[:, 1])
+
     target_auroc = 0.9 * real_auc
     print(f"[BASELINE] Real-data AUROC = {real_auc:.3f}, target τ = {target_auroc:.3f}")
 
