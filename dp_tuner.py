@@ -118,7 +118,7 @@ def preprocess_and_split(df: pd.DataFrame, label: str = "readmit_30d", test_size
         - X_train_raw, X_val_raw, X_test_raw (pandas DataFrames with label column)
     """
     # First split on RAW for generator training
-    print("label variable is now" + label)
+    print("label variable is now: " + label)
     print(df.columns)
     y_all = df[label].values
     X_all = df.drop(columns=[label])
