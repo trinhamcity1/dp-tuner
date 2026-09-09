@@ -323,7 +323,11 @@ class DPCTGAN:
         )
 
         # Shadow D (non-DP) for clean gradients to G
-        D_shadow = _Disc(d_in, d_cond, spectral=True).to(device)
+        # NOTE: must mirror D's architecture exactly (spectral=False) so state_dict
+        # keys line up for the load_state_dict sync below. spectral_norm reparameterizes
+        # weights into weight_orig/weight_u/weight_v, which breaks the copy if D itself
+        # isn't spectral-normed too.
+        D_shadow = _Disc(d_in, d_cond, spectral=False).to(device)
         D_shadow.load_state_dict(D_priv._module.state_dict())
         for p in D_shadow.parameters():
             p.requires_grad_(False)

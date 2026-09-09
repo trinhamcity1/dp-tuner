@@ -40,7 +40,25 @@ if __name__ == "__main__":
     if len(cols) == 0:
         raise ValueError(f"No columns found in: {csvs[0]}")
 
-    output_column = cols[-1]
+    # Guess the label column by name rather than always assuming it's last —
+    # e.g. the BRFSS diabetes CSV has its target ("Diabetes_012") as the FIRST
+    # column, not the last ("Income").
+    LABEL_HINTS = ["diabetes", "readmit", "label", "target", "class", "outcome", "y"]
+    lower_cols = [c.lower() for c in cols]
+    output_column = None
+    for hint in LABEL_HINTS:
+        for c, lc in zip(cols, lower_cols):
+            if hint in lc:
+                output_column = c
+                break
+        if output_column:
+            break
+    if output_column is None:
+        output_column = cols[-1]
+        print(f"[WARN] Could not guess label column by name; defaulting to last column '{output_column}'. "
+              f"Verify this is correct for your dataset.")
+    else:
+        print(f"[INFO] Detected label column: '{output_column}'")
 
     main(
         b=512,
