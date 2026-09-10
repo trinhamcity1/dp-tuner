@@ -67,7 +67,7 @@ if __name__ == "__main__":
         delta=None,
         sigma_grid=[1.2, 1.4, 1.6, 1.8, 2.0],
         seeds=[0, 1],
-        gen_kind="dp_ctgan",
+        gen_kind="dp_ctgan_v2",
         external_data_source=True,
         external_data_path=csvs[0],
         label_col = output_column

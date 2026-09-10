@@ -289,6 +289,11 @@ def run_tuner(
                 from dp_synth_data_gen.dpctgan import DPCTGAN
                 gen = DPCTGAN(epochs=policy.epochs, batch_size=policy.B,
                               max_grad_norm=policy.C, noise_multiplier=sigma, pac=16)
+            elif gen_kind == "dp_ctgan_v2":
+                print("The selected generator is " + gen_kind) # Add logging
+                from dp_synth_data_gen.dpctgan_v2 import DPCTGAN
+                gen = DPCTGAN(epochs=policy.epochs, batch_size=policy.B,
+                              max_grad_norm=policy.C, noise_multiplier=sigma, pac=16)
             else:
                 # Fallback to stub if no SDV and not DP gens
                 gen = StubGenerator(input_dim=X_train.shape[1], sigma=sigma, clip=policy.C, epochs=policy.epochs, seed=s)
@@ -310,7 +315,7 @@ def run_tuner(
                     gen.fit(X_train)
 
             # ---- Sampling branch ----
-            if gen_kind == "dp_ctgan":
+            if gen_kind in {"dp_ctgan", "dp_ctgan_v2"}:
                 print("The selected generator is " + gen_kind + "now entering sampling stage")
                 # Build a stratified label request with at least 1 sample per class
                 classes, counts = np.unique(y_train, return_counts=True)
