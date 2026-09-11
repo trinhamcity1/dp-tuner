@@ -138,10 +138,11 @@ class DPTVAE:
                     self._num_cols.append(c)
         self._cat_values = {}
         for c in self._cat_cols:
+            # Only add an NA_CAT bucket if the column actually had missing values in
+            # training -- otherwise it's a phantom class the decoder can sample from,
+            # which decodes to None -> NaN and crashes the downstream classifier.
             col = X_df[c].astype("object").where(pd.notnull(X_df[c]), "NA_CAT")
             cats = sorted(map(str, pd.Index(col.unique().tolist()).tolist()))
-            if "NA_CAT" not in cats:
-                cats = sorted(pd.Index([*cats, "NA_CAT"]).unique().tolist())
             self._cat_values[c] = cats
 
     def _fit_transform_X(self, X) -> Tuple[np.ndarray, np.ndarray]:
