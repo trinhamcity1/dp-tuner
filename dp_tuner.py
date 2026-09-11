@@ -315,7 +315,7 @@ def run_tuner(
                     gen.fit(X_train)
 
             # ---- Sampling branch ----
-            if gen_kind in {"dp_ctgan", "dp_ctgan_v2"}:
+            if gen_kind in {"dp_ctgan", "dp_ctgan_v2", "dp_tvae"}:
                 print("The selected generator is " + gen_kind + "now entering sampling stage")
                 # Build a stratified label request with at least 1 sample per class
                 classes, counts = np.unique(y_train, return_counts=True)
