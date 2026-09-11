@@ -43,10 +43,10 @@ class _Gen(nn.Module):
         return self.net(torch.cat([z, C], dim=1))
 
 class _Disc(nn.Module):
-    def __init__(self, d_in: int, d_cond: int, spectral: bool = False):
+    def __init__(self, d_in: int, d_cond: int, spectral: bool = False, widths: Tuple[int, ...] = (256, 128)):
         super().__init__()
         # spectral=True ONLY for the NON-DP shadow D
-        self.net = _mlp(d_in + d_cond, 1, widths=(256, 128), spectral=spectral)
+        self.net = _mlp(d_in + d_cond, 1, widths=widths, spectral=spectral)
 
     def forward(self, x: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
         return self.net(torch.cat([x, C], dim=1)).flatten()
@@ -85,6 +85,7 @@ class DPCTGAN:
         secure_mode: bool = False,
         n_critic: int = 1,
         pac: int = 1,
+        d_widths: Tuple[int, ...] = (256, 128),
         # new internal knobs (do not change signature/returns)
         _disc_input_jitter_std: float = 0.01,   # small Gaussian noise on D inputs
         _balance_labels_uniform: bool = True,   # sample labels uniformly when training G
@@ -103,6 +104,7 @@ class DPCTGAN:
         self.device = device
         self.secure_mode = secure_mode
         self.n_critic = int(n_critic)
+        self.d_widths = tuple(d_widths)
         if pac != 1:
             print(f"[WARN] pac={pac} requested; forcing pac=1 for DP per-sample gradients.")
         self.pac = 1
@@ -304,7 +306,7 @@ class DPCTGAN:
         d_cond = C_mat.shape[1]
 
         G = _Gen(self.z_dim, d_cond, d_in).to(device)
-        D = _Disc(d_in, d_cond).to(device)
+        D = _Disc(d_in, d_cond, widths=self.d_widths).to(device)
         optG = torch.optim.Adam(G.parameters(), lr=self.lr_g, betas=(0.5, 0.9))
         optD = torch.optim.Adam(D.parameters(), lr=self.lr_d, betas=(0.5, 0.9))
 
@@ -327,7 +329,7 @@ class DPCTGAN:
         # keys line up for the load_state_dict sync below. spectral_norm reparameterizes
         # weights into weight_orig/weight_u/weight_v, which breaks the copy if D itself
         # isn't spectral-normed too.
-        D_shadow = _Disc(d_in, d_cond, spectral=False).to(device)
+        D_shadow = _Disc(d_in, d_cond, spectral=False, widths=self.d_widths).to(device)
         D_shadow.load_state_dict(D_priv._module.state_dict())
         for p in D_shadow.parameters():
             p.requires_grad_(False)
