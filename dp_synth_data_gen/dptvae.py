@@ -79,7 +79,8 @@ class DPTVAE:
         delta: float = 1e-5,
         lr: float = 1e-3,
         latent_dim: int = 16,
-        beta: float = 0.02,          # KL weight; low so reconstruction fidelity dominates under DP noise
+        beta: float = 1.0,           # KL weight; higher values regularize against overfitting to DP noise
+                                     # (swept empirically: 0.02->0.68 AUROC, 0.8-1.0->~0.72, 4.0->0.70 degrading)
         device: Optional[str] = "auto",
         secure_mode: bool = False,
         _num_quantiles: int = 1000,
