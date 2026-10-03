@@ -81,6 +81,7 @@ class DPTVAE:
         latent_dim: int = 16,
         beta: float = 1.0,           # KL weight; higher values regularize against overfitting to DP noise
                                      # (swept empirically: 0.02->0.68 AUROC, 0.8-1.0->~0.72, 4.0->0.70 degrading)
+        decode: str = "sample",     # "sample" from the categorical likelihood, or "argmax" (mode)
         device: Optional[str] = "auto",
         secure_mode: bool = False,
         _num_quantiles: int = 1000,
@@ -94,6 +95,8 @@ class DPTVAE:
         self.lr = float(lr)
         self.latent_dim = int(latent_dim)
         self.beta = float(beta)
+        self.decode = decode
+        self._sample_rng = np.random.RandomState(kwargs.get("random_state", 0))
         self.device = device
         self.secure_mode = secure_mode
         self._num_quantiles = int(_num_quantiles)
@@ -213,7 +216,15 @@ class DPTVAE:
         for c in self._cat_cols:
             sl = self._feature_slices[c]
             block = M[:, sl]
-            idx = block.argmax(axis=1)
+            if self.decode == "argmax":
+                idx = block.argmax(axis=1)
+            else:
+                # Draw from the decoder's categorical likelihood; argmax collapses columns to their modes.
+                logits = block - block.max(axis=1, keepdims=True)
+                probs = np.exp(logits)
+                probs /= probs.sum(axis=1, keepdims=True)
+                u = self._sample_rng.random_sample((len(probs), 1))
+                idx = np.minimum((probs.cumsum(axis=1) < u).sum(axis=1), probs.shape[1] - 1)
             labels = self._cat_values[c]
             out[c] = [None if labels[int(k)] == "NA_CAT" else labels[int(k)] for k in idx]
         cols = self._orig_columns if self._orig_columns else (self._num_cols + self._cat_cols)

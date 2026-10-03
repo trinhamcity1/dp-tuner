@@ -22,7 +22,8 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 DELTA = 1e-6
 SPLIT_SEED = 7
 TEST_FRACTION = 0.2
-STEP_BUDGET = int(os.environ.get("STEP_BUDGET", 5000))  # DP-SGD optimizer steps, held fixed across datasets
+STEP_BUDGET = int(os.environ.get("STEP_BUDGET", 2000))  # DP-SGD optimizer steps, held fixed across datasets
+NONPRIVATE_STEPS = 5000
 BATCH = 512
 CLIP = 1.6
 LABEL_EPS_FRACTION = 0.05
@@ -174,7 +175,7 @@ def run_method(method, eps, seed, train, schema):
         md.detect_from_dataframe(train)
         for c in train.columns:
             md.update_column(c, sdtype="categorical")
-        epochs = max(1, int(round(STEP_BUDGET * 500 / n)))
+        epochs = max(1, int(round(NONPRIVATE_STEPS * 500 / n)))  # non-private references get a larger budget
         cls = CTGANSynthesizer if method == "ctgan" else TVAESynthesizer
         synth = cls(md, epochs=epochs, batch_size=500, enforce_rounding=False) if method == "tvae" else \
             cls(md, epochs=epochs, batch_size=500, pac=10)
@@ -196,16 +197,17 @@ def run_method(method, eps, seed, train, schema):
         info["epochs"] = epochs
         return synth.sample(n).astype(str), info
 
-    if method in ("dpvae", "dpctgan"):
+    if method in ("dpvae", "dpvae_argmax", "dpctgan"):
         rng = np.random.RandomState(seed)
         eps_label = LABEL_EPS_FRACTION * eps
         eps_sgd = eps - eps_label
         epochs = max(1, int(round(STEP_BUDGET / (n // BATCH))))
         sigma = dp_sgd_sigma(eps_sgd, n, epochs)
         X, y = train.drop(columns=[label]), train[label]
-        if method == "dpvae":
+        if method.startswith("dpvae"):
             from dp_synth_data_gen.dptvae import DPTVAE
-            gen = DPTVAE(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=DELTA)
+            gen = DPTVAE(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=DELTA,
+                         decode="argmax" if method == "dpvae_argmax" else "sample", random_state=seed)
         else:
             from dp_synth_data_gen.dpctgan_v2 import DPCTGAN
             gen = DPCTGAN(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=DELTA)

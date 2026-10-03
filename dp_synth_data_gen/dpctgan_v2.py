@@ -164,9 +164,7 @@ class DPCTGAN:
         for c in self._cat_cols:
             col = X_df[c].astype("object").where(pd.notnull(X_df[c]), "NA_CAT")
             cats = sorted(map(str, pd.Index(col.unique().tolist()).tolist()))
-            # ensure missing bucket exists
-            if "NA_CAT" not in cats:
-                cats = sorted(pd.Index([*cats, "NA_CAT"]).unique().tolist())
+            # NA_CAT appears only if the column had missing values; a phantom bucket decodes to None.
             self._cat_values[c] = cats
 
     def _fit_transform_X(self, X) -> np.ndarray:
@@ -285,6 +283,17 @@ class DPCTGAN:
     # -------------------------
     # training
     # -------------------------
+    def _activate(self, x: torch.Tensor, tau: float = 0.2) -> torch.Tensor:
+        """Gumbel-softmax over each categorical block (as in CTGAN); numeric block stays linear.
+
+        Without this, G emits unconstrained reals that D trivially separates from one-hot data.
+        """
+        parts = []
+        for key, sl in sorted(self._feature_slices.items(), key=lambda kv: kv[1].start):
+            block = x[:, sl]
+            parts.append(block if key == "__NUM__" else torch.nn.functional.gumbel_softmax(block, tau=tau))
+        return torch.cat(parts, dim=1)
+
     def fit(self, X, y: Optional[pd.Series] = None):
         if isinstance(X, pd.DataFrame):
             X_df = X
@@ -353,7 +362,7 @@ class DPCTGAN:
                     # fake
                     z = torch.randn(xb.size(0), self.z_dim, device=device)
                     with torch.no_grad():
-                        x_fake = G(z, cb).detach()
+                        x_fake = self._activate(G(z, cb)).detach()
                     if self._disc_input_jitter_std > 0:
                         x_fake = x_fake + torch.randn_like(x_fake) * self._disc_input_jitter_std
 
@@ -384,7 +393,7 @@ class DPCTGAN:
                 else:
                     Cb = torch.zeros(xb.size(0), 0, device=device)
 
-                x_fake = G(z, Cb)
+                x_fake = self._activate(G(z, Cb))
                 d_fake_for_G = D_shadow(x_fake, Cb)
                 y_real_for_G = torch.ones_like(d_fake_for_G, device=device)
                 lossG = bce(d_fake_for_G, y_real_for_G)
@@ -437,7 +446,7 @@ class DPCTGAN:
                 ).float()
             else:
                 C = torch.zeros((n, 0), device=self._device)
-            Xgen = self._G(z, C).cpu().numpy().astype(np.float32)
+            Xgen = self._activate(self._G(z, C)).cpu().numpy().astype(np.float32)
 
         df = self._inverse_transform(Xgen)
 
