@@ -18,3 +18,4 @@ journal.txt
 experiments/data/
 experiments/logs/
 __pycache__/
+experiments/results.jsonl

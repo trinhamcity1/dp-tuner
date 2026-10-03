@@ -20,7 +20,7 @@ REFERENCES = ["identity", "ctgan", "tvae"]
 
 
 def load():
-    rows = [json.loads(l) for l in open(os.path.join(HERE, "results.jsonl")) if l.strip()]
+    rows = [json.loads(l) for l in open(os.path.join(HERE, os.environ.get("RESULTS_FILE", "results.jsonl"))) if l.strip()]
     return pd.DataFrame(rows)
 
 
