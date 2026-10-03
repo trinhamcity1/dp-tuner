@@ -299,8 +299,12 @@ class DPTVAE:
                 opt.step()
 
         self._model = model
+        self._privacy_engine = pe
         self._fitted = True
         return self
+
+    def get_epsilon(self, delta: float) -> float:
+        return float(self._privacy_engine.get_epsilon(delta))
 
     # ---- sampling ----
     def sample(self, n: int, return_y: bool = False, y_cond: Optional[np.ndarray] = None):

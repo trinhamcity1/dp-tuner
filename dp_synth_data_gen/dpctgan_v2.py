@@ -392,6 +392,7 @@ class DPCTGAN:
                 optG.step()
 
         self._G = G
+        self._privacy_engine = peD
         self._fitted = True
 
     # -------------------------
@@ -447,6 +448,9 @@ class DPCTGAN:
                 y_out = None
             return df, y_out
         return df
+
+    def get_epsilon(self, delta: float) -> float:
+        return float(self._privacy_engine.get_epsilon(delta))
 
     def sample_labels(self, n: int) -> Optional[np.ndarray]:
         if not self._has_y or self._y_classes is None:

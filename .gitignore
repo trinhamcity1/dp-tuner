@@ -14,3 +14,7 @@ __pycache__
 #report & journal
 journal.txt
  
+# Benchmark data (rebuilt by experiments/prepare_data.py) and run logs
+experiments/data/
+experiments/logs/
+__pycache__/
