@@ -24,6 +24,7 @@ SPLIT_SEED = 7
 TEST_FRACTION = 0.2
 STEP_BUDGET = int(os.environ.get("STEP_BUDGET", 2000))  # DP-SGD optimizer steps, held fixed across datasets
 NONPRIVATE_STEPS = 5000
+AIM_MAX_MODEL_MB = 20
 BATCH = 512
 CLIP = 1.6
 LABEL_EPS_FRACTION = 0.05
@@ -187,6 +188,14 @@ def run_method(method, eps, seed, train, schema):
         from snsynth import Synthesizer
         synth = Synthesizer.create("mst", epsilon=eps, delta=DELTA)
         synth.fit(train, categorical_columns=list(train.columns), preprocessor_eps=0.0)
+        return synth.sample(n).astype(str), info
+
+    if method == "aim":
+        # AIM (McKenna et al. 2022), workload-adaptive successor to MST; model size capped for CPU tractability.
+        from snsynth import Synthesizer
+        synth = Synthesizer.create("aim", epsilon=eps, delta=DELTA, max_model_size=AIM_MAX_MODEL_MB)
+        synth.fit(train, categorical_columns=list(train.columns), preprocessor_eps=0.0)
+        info["max_model_size_mb"] = AIM_MAX_MODEL_MB
         return synth.sample(n).astype(str), info
 
     if method == "patectgan":

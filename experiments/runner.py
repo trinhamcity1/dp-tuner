@@ -52,6 +52,10 @@ def queue():
         for seed in range(3):
             for eps in EPSILONS:
                 jobs.append((ds, "dpvae_argmax", eps, seed))
+    for ds in DATASETS:
+        for seed in range(3):
+            for eps in EPSILONS:
+                jobs.append((ds, "aim", eps, seed))
     return jobs
 
 
