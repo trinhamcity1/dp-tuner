@@ -59,6 +59,10 @@ def queue():
         for seed in range(3, 10):
             for eps in EPSILONS:
                 jobs.append((ds, "dpvae_argmax", eps, seed))
+    for seed in range(10):
+        for ds in DATASETS:
+            for eps in EPSILONS:
+                jobs.append((ds, "dpvae_prior", eps, seed))
     # AIM's runtime grows steeply with epsilon (~27 min at eps=1, >2 h at eps=2 on Adult),
     # so one seed per cell first and extra seeds only as time allows.
     for seed in range(3):

@@ -9,7 +9,7 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATASETS = ["adult", "diabetes130", "brfss"]
-ROWS = [("dpvae", "DP-VAE (ours)"), ("mst", "MST"), ("aim", "AIM"), ("dpctgan", "DP-CTGAN"),
+ROWS = [("dpvae_prior", "DP-VAE + DP latent prior (ours)"), ("dpvae", "DP-VAE (ours)"), ("mst", "MST"), ("aim", "AIM"), ("dpctgan", "DP-CTGAN"),
         ("patectgan", "PATE-CTGAN (smartnoise)"), ("dpvae_argmax", "DP-VAE, argmax decoding")]
 REFS = [("identity", "Real training data"), ("ctgan", "CTGAN (non-private)"), ("tvae", "TVAE (non-private)")]
 EPS = [1.0, 2.0, 4.0]

@@ -15,7 +15,7 @@ from scipy import stats
 HERE = os.path.dirname(os.path.abspath(__file__))
 METRICS = ["auroc_lr", "auroc_hgb", "tvd_1way", "tvd_2way", "mia_auc"]
 HIGHER_IS_BETTER = {"auroc_lr": True, "auroc_hgb": True, "tvd_1way": False, "tvd_2way": False, "mia_auc": None}
-DP_METHODS = ["dpvae", "mst", "patectgan", "dpctgan", "dpvae_argmax"]
+DP_METHODS = ["dpvae", "mst", "aim", "patectgan", "dpctgan", "dpvae_argmax", "dpvae_prior"]
 REFERENCES = ["identity", "ctgan", "tvae"]
 
 
