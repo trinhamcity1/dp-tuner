@@ -62,7 +62,13 @@ def main():
                "mean_abs_mu": float(mu.abs().mean()), "mean_post_var": float(torch.exp(logvar).mean()),
                "agg_post_var_per_dim": float(z_post.var(0).mean()),
                "active_dims_var_mu_gt_0.01": int((mu.var(0) > 0.01).sum())}
-        for name, z in [("prior", z_prior), ("posterior", z_post)]:
+        zp = z_post.numpy().astype(np.float64)
+        mean, cov = zp.mean(0), np.cov(zp, rowvar=False)
+        z_gauss = torch.from_numpy(np.random.multivariate_normal(mean, cov, size=len(zp)).astype(np.float32))
+        from sklearn.mixture import GaussianMixture
+        gmm = GaussianMixture(10, covariance_type="full", random_state=0).fit(zp[np.random.choice(len(zp), 20000, replace=False)])
+        z_gmm = torch.from_numpy(gmm.sample(len(zp))[0].astype(np.float32)[np.random.permutation(len(zp))])
+        for name, z in [("prior", z_prior), ("posterior", z_post), ("gauss_fit", z_gauss), ("gmm10_fit", z_gmm)]:
             syn = decode(gen, z, c_idx)
             syn[label] = y.values
             syn = syn[train.columns].astype(str)
