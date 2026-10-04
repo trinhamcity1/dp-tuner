@@ -16,7 +16,7 @@ variational autoencoder trained with DP-SGD (DP-VAE) beats MST on train-on-synth
 AUROC in all nine settings (+0.05 to +0.15 AUROC; Holm-corrected p ≤ 0.008, 10 paired seeds), and
 beats DP-SGD and PATE-based CTGAN variants. At ε = 1 its utility matches that of non-private CTGAN and
 TVAE. A single design choice drives much of this: decoding categorical columns by sampling from the decoder's
-likelihood instead of taking the argmax, which costs 0.03–0.14 AUROC and multiplies 2-way marginal
+likelihood instead of taking the argmax, which costs 0.02–0.12 AUROC and multiplies 2-way marginal
 error 2–7× when omitted. MST keeps an advantage on one-way marginals, so the result is a
 utility/fidelity trade-off rather than uniform dominance. A distance-to-closest-record membership
 attack finds no detectable leakage for any DP method (mean AUC 0.494–0.512, versus 0.56–0.66 when the
@@ -60,8 +60,8 @@ contributions are:
    baselines in most, at modest CPU cost (Section 5.1).
 3. A characterisation of the trade-off: marginal methods remain better at reproducing low-order
    marginals, while DP-VAE preserves more predictive signal (Section 5.2).
-4. An ablation showing that sampling, rather than argmax decoding, accounts for much of DP-VAE's
-   advantage (Section 5.3).
+4. An ablation (10 seeds) showing that sampling, rather than argmax decoding, accounts for much of
+   DP-VAE's advantage (Section 5.3).
 5. An empirical membership-inference check (Section 5.4), and an implementation flaw in a widely used
    PATE-CTGAN library that invalidates its privacy analysis (Section 6).
 
@@ -159,7 +159,7 @@ AUROC is undefined for them.
 
 - DP-VAE beats MST in all nine (dataset, ε) cells: +0.116 to +0.131 on Adult, +0.048 to +0.062 on
   Diabetes130, +0.145 to +0.147 on BRFSS (10 paired seeds; Holm-corrected p ≤ 0.008 everywhere).
-- DP-VAE beats PATE-CTGAN in 7 of 9 cells and DP-CTGAN in 5 of 9 at Holm-corrected α = 0.05; in the
+- DP-VAE beats PATE-CTGAN in 8 of 9 cells and DP-CTGAN in 7 of 9 at Holm-corrected α = 0.05; in the
   remaining cells the mean difference still favours DP-VAE (+0.05 to +0.12) but intervals are wide
   (5 seeds).
 - At ε = 1, DP-VAE is within 0.01 of non-private CTGAN/TVAE on Adult and matches or exceeds them on
@@ -183,19 +183,23 @@ AUROC is undefined for them.
 
 ### 5.3 Ablation: categorical decoding
 
-Same model and training; only the decoding rule changes (argmax: 3 seeds; sampling: 10 seeds):
+Same model and training; only the decoding rule changes (10 paired seeds per cell, ε = 1 shown):
 
-| Decoding | Adult ε=1 AUROC | Adult ε=1 2-way TVD | Diabetes130 ε=1 AUROC | BRFSS ε=1 AUROC |
-|---|---|---|---|---|
-| Sample from softmax (default) | 0.877 | 0.119 | 0.570 | 0.733 |
-| Argmax | 0.791 | 0.418 | 0.523 | 0.668 |
+| Decoding | Adult AUROC | Adult 2-way TVD | Diabetes130 AUROC | Diabetes130 2-way TVD | BRFSS AUROC | BRFSS 2-way TVD |
+|---|---|---|---|---|---|---|
+| Sample from softmax (default) | **0.877** | **0.119** | **0.570** | **0.062** | **0.733** | **0.087** |
+| Argmax | 0.785 | 0.420 | 0.519 | 0.449 | 0.680 | 0.174 |
 
-Argmax collapses each column toward its conditional mode. That inflates 2-way error 2–7× and costs
-0.03–0.14 AUROC; with argmax decoding, DP-VAE falls to roughly MST's utility. The direction is the
-same in all 9 cells and every unadjusted paired p is below 0.05, but with only 3 seeds none survives
-Holm correction across all 36 utility comparisons. *To do: run 10 seeds for the ablation.* Sampling is the decoding
-rule that matches the model's own likelihood, so we recommend it as the default for any VAE-style
-tabular synthesizer.
+Argmax collapses each column toward its conditional mode. Across all nine (dataset, ε) cells,
+sampling improves AUROC by 0.02–0.12 (significant after Holm correction in 8 of 9 cells; the
+exception is Diabetes130 at ε = 2, with p_Holm = 0.055). It also lowers both 1-way and 2-way marginal
+error in all 9 cells (2-way TVD 2.0–7.3× lower at ε = 1). With argmax decoding, DP-VAE loses most of
+its advantage over MST on Adult and Diabetes130. Sampling is the decoding rule that matches the
+model's own likelihood, so we recommend it as the default for any VAE-style tabular synthesizer.
+
+The argmax gap narrows as ε grows (e.g. Adult 2-way TVD gap 0.30 → 0.15 from ε = 1 to 4): with less
+noise the decoder is more confident and the argmax discards less. This is consistent with the
+DP-VAE fidelity trend in Section 5.2.
 
 ### 5.4 Empirical privacy check
 
