@@ -136,6 +136,28 @@ KL weight β = 1. Each categorical column is decoded as a softmax over its domai
 cross-entropy. At sampling time we draw z ~ N(0, I) and **sample each column from its softmax**
 rather than taking the argmax.
 
+**DP latent prior (DP-VAE + prior).** A VAE generates by decoding z ~ N(0, I), but the training
+objective only pulls the *aggregate* posterior q(z) = E_x q(z|x) toward that prior. Under DP-SGD the
+gap between them grows as ε increases (less noise lets the encoder use more of the latent space),
+and decoding prior samples then lands in regions the decoder was rarely trained on. A
+non-private diagnostic on Adult (seed 0) isolates the effect: decoding posterior samples of the
+training rows gives 2-way TVD 0.055 (ε = 1) and 0.041 (ε = 4), while decoding prior samples gives
+0.115 and 0.162. Fitting a single Gaussian to the aggregate posterior already recovers most of the
+gap (0.065 and 0.066). We make this fit private:
+
+1. After DP-SGD, draw one posterior sample z_i ~ q(z | x_i, y_i) per training row and clip it to
+   L2 norm R (R = 6; under 2% of rows are clipped).
+2. Release the vector [Σ z_i, vec(Σ z_i z_iᵀ) / R] once with the Gaussian mechanism. Under add/remove
+   adjacency its L2 sensitivity is R√2. The noise scale comes from the exact analytic Gaussian
+   mechanism (Balle & Wang, 2018) at (ε_prior, δ/2), with ε_prior = 0.05 ε.
+3. Normalise by the noisy row count n̂ from the label histogram, which is already DP and so costs no
+   extra budget. Then form the mean and covariance, project the covariance onto the PSD cone
+   (eigenvalues ≥ 10⁻³), and sample z ~ N(μ̂, Σ̂) at generation time.
+
+Total budget: ε_label + ε_prior + ε_SGD = ε (5% + 5% + 90%), and DP-SGD and the prior release each
+use δ/2, so the whole pipeline is (ε, δ)-DP by basic composition. The extra cost is one forward pass
+over the training data.
+
 ## 5. Results
 
 Full tables: `paper/tables.md`. Paired tests: `experiments/summary.md`.
