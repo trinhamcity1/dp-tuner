@@ -28,6 +28,8 @@ AIM_MAX_MODEL_MB = 20
 BATCH = 512
 CLIP = 1.6
 LABEL_EPS_FRACTION = 0.05
+PRIOR_EPS_FRACTION = 0.05   # dpvae_prior only: DP Gaussian fit of the aggregate posterior
+PRIOR_CLIP = 6.0
 MIA_QUERIES = 2000
 MIA_SYNTH_ROWS = 20000
 
@@ -146,13 +148,34 @@ def noisy_label_sampler(train, label, schema, eps_label, rng):
     counts = train[label].value_counts().reindex(classes, fill_value=0).values.astype(float)
     noisy = np.clip(counts + rng.laplace(0, 1.0 / eps_label, size=len(counts)), 0, None)
     probs = noisy / noisy.sum() if noisy.sum() > 0 else np.ones(len(classes)) / len(classes)
-    return lambda n: rng.choice(classes, size=n, p=probs)
+    return (lambda n: rng.choice(classes, size=n, p=probs)), float(noisy.sum())
 
 
-def dp_sgd_sigma(eps, n_train, epochs):
+def analytic_gaussian_sigma(eps, delta):
+    """Smallest noise multiplier (std / L2 sensitivity) making one Gaussian release (eps, delta)-DP.
+
+    Exact characterisation of Balle & Wang (2018), Theorem 8:
+    delta(eps) = Phi(1/(2s) - eps*s) - e^eps * Phi(-1/(2s) - eps*s), decreasing in s.
+    """
+    from scipy.stats import norm
+
+    def delta_of(s):
+        return norm.cdf(0.5 / s - eps * s) - np.exp(eps) * norm.cdf(-0.5 / s - eps * s)
+
+    lo, hi = 1e-3, 1e4
+    for _ in range(200):
+        mid = np.sqrt(lo * hi)
+        if delta_of(mid) > delta:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
+def dp_sgd_sigma(eps, n_train, epochs, delta=DELTA):
     from opacus.accountants.utils import get_noise_multiplier
     sample_rate = 1.0 / (n_train // BATCH)
-    return get_noise_multiplier(target_epsilon=eps, target_delta=DELTA, sample_rate=sample_rate,
+    return get_noise_multiplier(target_epsilon=eps, target_delta=delta, sample_rate=sample_rate,
                                 epochs=epochs, accountant="prv")
 
 
@@ -206,29 +229,37 @@ def run_method(method, eps, seed, train, schema):
         info["epochs"] = epochs
         return synth.sample(n).astype(str), info
 
-    if method in ("dpvae", "dpvae_argmax", "dpctgan"):
+    if method in ("dpvae", "dpvae_argmax", "dpvae_prior", "dpctgan"):
         rng = np.random.RandomState(seed)
         eps_label = LABEL_EPS_FRACTION * eps
-        eps_sgd = eps - eps_label
+        eps_prior = PRIOR_EPS_FRACTION * eps if method == "dpvae_prior" else 0.0
+        eps_sgd = eps - eps_label - eps_prior
+        # The latent-prior release gets half of delta; DP-SGD the rest (basic composition).
+        delta_sgd = DELTA / 2 if method == "dpvae_prior" else DELTA
         epochs = max(1, int(round(STEP_BUDGET / (n // BATCH))))
-        sigma = dp_sgd_sigma(eps_sgd, n, epochs)
+        sigma = dp_sgd_sigma(eps_sgd, n, epochs, delta=delta_sgd)
         X, y = train.drop(columns=[label]), train[label]
         if method.startswith("dpvae"):
             from dp_synth_data_gen.dptvae import DPTVAE
-            gen = DPTVAE(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=DELTA,
+            gen = DPTVAE(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=delta_sgd,
                          decode="argmax" if method == "dpvae_argmax" else "sample", random_state=seed)
         else:
             from dp_synth_data_gen.dpctgan_v2 import DPCTGAN
             gen = DPCTGAN(epochs=epochs, batch_size=BATCH, max_grad_norm=CLIP, noise_multiplier=sigma, delta=DELTA)
         gen.fit(X, y)
-        sample_labels = noisy_label_sampler(train, label, schema, eps_label, rng)
+        sample_labels, n_hat = noisy_label_sampler(train, label, schema, eps_label, rng)
+        if method == "dpvae_prior":
+            sigma_prior = analytic_gaussian_sigma(eps_prior, DELTA / 2)
+            gen.fit_latent_prior(X, y, noise_multiplier=sigma_prior, n_hat=n_hat, clip_radius=PRIOR_CLIP, seed=seed)
+            info.update({"eps_prior": float(eps_prior), "sigma_prior": float(sigma_prior),
+                         "prior_clip_frac": gen._z_clip_frac})
         y_req = sample_labels(n)
         y_req = np.array([type(gen._y_classes[0])(v) for v in y_req]) if gen._y_classes is not None else y_req
         syn_X, y_out = gen.sample(n, return_y=True, y_cond=y_req)
         syn = syn_X.astype(str)
         syn[label] = pd.Series(y_out).astype(str).values
         info.update({"epochs": epochs, "sigma": float(sigma), "eps_sgd_target": float(eps_sgd),
-                     "eps_sgd_spent": gen.get_epsilon(DELTA), "eps_label": float(eps_label)})
+                     "eps_sgd_spent": gen.get_epsilon(delta_sgd), "eps_label": float(eps_label)})
         return syn[train.columns], info
 
     raise ValueError(method)

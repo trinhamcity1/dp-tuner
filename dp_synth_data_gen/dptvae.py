@@ -314,6 +314,47 @@ class DPTVAE:
         self._fitted = True
         return self
 
+    def fit_latent_prior(self, X, y, noise_multiplier: float, n_hat: float, clip_radius: float = 6.0,
+                         seed: int = 0):
+        """Replace the N(0, I) sampling prior with a DP Gaussian fit to the aggregate posterior.
+
+        Each training row contributes one posterior sample z, clipped to L2 norm `clip_radius` (R).
+        The query [sum z, vec(sum z z^T) / R] has L2 sensitivity R * sqrt(2) under add/remove, and is
+        released once with the Gaussian mechanism at `noise_multiplier`. `n_hat` must itself be DP
+        (e.g. the noisy label-histogram total), so this step's privacy cost is that of one Gaussian
+        mechanism and composes with DP-SGD.
+        """
+        mod = self._model._module if hasattr(self._model, "_module") else self._model
+        mod.eval()
+        X_df = X if isinstance(X, pd.DataFrame) else pd.DataFrame(X, columns=self._orig_columns)
+        M, _ = self._fit_transform_X(X_df)
+        mapping = {v: i for i, v in enumerate(self._y_classes.tolist())}
+        c_idx = np.array([mapping[v] for v in np.asarray(y)])
+        C = torch.nn.functional.one_hot(torch.from_numpy(c_idx), num_classes=self._d_cond).float()
+        gen = torch.Generator().manual_seed(seed)
+        with torch.no_grad():
+            mu, logvar = mod.encode(torch.from_numpy(M).float().to(self._device), C.to(self._device))
+            z = mu + torch.randn(mu.shape, generator=gen).to(mu.device) * torch.exp(0.5 * logvar)
+        z = z.cpu().double().numpy()
+        R = float(clip_radius)
+        norms = np.linalg.norm(z, axis=1, keepdims=True)
+        z = z * np.minimum(1.0, R / np.maximum(norms, 1e-12))
+        d = z.shape[1]
+        rng = np.random.RandomState(seed + 7919)
+        std = noise_multiplier * R * np.sqrt(2.0)
+        s1 = z.sum(0) + rng.normal(0, std, d)
+        s2 = (z.T @ z) / R + rng.normal(0, std, (d, d))
+        s2 = 0.5 * (s2 + s2.T) * R
+        n_hat = max(float(n_hat), 1.0)
+        mean = s1 / n_hat
+        cov = s2 / n_hat - np.outer(mean, mean)
+        w, V = np.linalg.eigh(cov)
+        cov = (V * np.clip(w, 1e-3, None)) @ V.T
+        self._z_mean = torch.from_numpy(mean.astype(np.float32)).to(self._device)
+        self._z_chol = torch.from_numpy(np.linalg.cholesky(cov).astype(np.float32)).to(self._device)
+        self._z_clip_frac = float((norms[:, 0] > R).mean())
+        return self
+
     def get_epsilon(self, delta: float) -> float:
         return float(self._privacy_engine.get_epsilon(delta))
 
@@ -336,6 +377,8 @@ class DPTVAE:
 
         with torch.no_grad():
             z = torch.randn(n, self.latent_dim, device=self._device)
+            if getattr(self, "_z_chol", None) is not None:
+                z = self._z_mean + z @ self._z_chol.T
             if self._d_cond > 0:
                 C = torch.nn.functional.one_hot(torch.from_numpy(c_idx).to(self._device), num_classes=self._d_cond).float()
             else:
