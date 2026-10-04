@@ -26,33 +26,71 @@ privacy analysis does not apply as implemented.
 
 ## 1. Introduction
 
-*To write.* Points to make:
+Health agencies, survey programmes and companies increasingly want to share tabular microdata for
+model development without exposing the individuals in it. Differentially private (DP) synthetic data
+promises a release that can be reused indefinitely under a single formal privacy budget. For many
+users the question is practical: will a classifier trained on the synthetic table still work on real
+people? This is the train-on-synthetic, test-on-real (TSTR) setting we study.
 
-- Practitioners need DP synthetic data that preserves predictive signal; marginal-based methods
-  (MST, AIM) dominate recent benchmarks on fidelity, and deep generators are often reported as weak
-  under DP.
-- Many published comparisons let deep methods see non-private statistics through preprocessing
-  (e.g. quantile normalisers, observed category lists, class proportions). Our own earlier pipeline
-  did this, and its reported advantage did not survive a leakage-free re-run at the original effect
-  size. We therefore treat the protocol itself as a contribution.
-- Contributions:
-  1. A leakage-free protocol and open benchmark harness (Section 3).
-  2. Evidence across 3 datasets × 3 budgets that a DP-SGD conditional VAE with likelihood sampling
-     outperforms MST and DP GAN baselines on downstream utility (Section 5.1).
-  3. An ablation isolating categorical decoding as the key design choice (Section 5.3).
-  4. A characterisation of the utility/fidelity trade-off against MST (Section 5.2).
-  5. An empirical membership-inference check (Section 5.4) and an implementation flaw in a popular
-     PATE-CTGAN library (Section 6).
+Recent benchmarks have largely settled on marginal-based mechanisms such as MST and AIM as the
+state of the art, with deep generative models (GANs and VAEs trained with DP-SGD) reported as weaker
+under realistic budgets. We argue that two methodological issues blur this comparison.
+
+First, **preprocessing leakage.** Deep tabular generators are usually wrapped in data-dependent
+transforms: quantile or mode-specific normalisers fitted on the raw data, category vocabularies read
+off the training set, and class proportions copied from it. None of these is covered by the
+mechanism's privacy accounting. Marginal-based libraries, by contrast, ask for a public domain or
+spend budget to learn one. Comparisons that mix the two give the deep models non-private information.
+Our own earlier pipeline made exactly this mistake, and its reported advantage shrank when we removed
+it; we therefore treat a leakage-free protocol as a first-class contribution.
+
+Second, **decoding.** VAE-style tabular synthesizers model each categorical column with a softmax, but
+implementations often emit the argmax at sampling time. Under DP noise the decoder is uncertain, so
+the argmax collapses columns toward their modes. That destroys the marginals and the label–feature
+dependencies a downstream classifier needs.
+
+With both issues fixed, a simple conditional VAE trained with DP-SGD becomes a strong baseline. Our
+contributions are:
+
+1. A leakage-free evaluation protocol and an open, restart-safe benchmark harness, in which every
+   method receives the same public-domain table and spends its whole budget inside the mechanism
+   (Section 3).
+2. A controlled comparison on three public datasets at three budgets, with 10 paired seeds and
+   multiplicity-corrected tests. DP-VAE beats MST on TSTR AUROC in every setting and beats DP GAN
+   baselines in most, at modest CPU cost (Section 5.1).
+3. A characterisation of the trade-off: marginal methods remain better at reproducing low-order
+   marginals, while DP-VAE preserves more predictive signal (Section 5.2).
+4. An ablation showing that sampling, rather than argmax decoding, accounts for much of DP-VAE's
+   advantage (Section 5.3).
+5. An empirical membership-inference check (Section 5.4), and an implementation flaw in a widely used
+   PATE-CTGAN library that invalidates its privacy analysis (Section 6).
 
 ## 2. Background and related work
 
-*To write.* DP-SGD and RDP/PRV accounting (Abadi et al. 2016; Mironov 2017; Gopi et al. 2021).
-Marginal-based synthesis: MST (McKenna et al. 2021), AIM (McKenna et al. 2022), Private-PGM.
-Deep DP synthesis: DP-CTGAN (Fang et al. 2022), PATE-GAN (Jordon et al. 2019), PATE-CTGAN
-(Rosenblatt et al. 2020), DP-VAE variants. Benchmarks: Tao et al. 2021; Ganev & De Cristofaro on
-graphical vs deep models. Auditing and implementation bugs: Annamalai et al. 2024 (tight auditing);
-Ganev, Annamalai & De Cristofaro, TMLR 2025 (19 privacy violations across six PATE-GAN
-implementations). Similarity-based privacy metrics and their limits.
+**Differential privacy and DP-SGD.** A mechanism M is (ε, δ)-DP if, for neighbouring datasets D and D′,
+Pr[M(D) ∈ S] ≤ e^ε Pr[M(D′) ∈ S] + δ. DP-SGD (Abadi et al., 2016) clips per-example gradients and
+adds Gaussian noise; its cumulative privacy loss is tracked with Rényi DP (Mironov, 2017) or
+numerical privacy-loss-distribution accountants such as PRV (Gopi et al., 2021). Post-processing
+preserves DP, so sampling from a DP-trained generator costs no additional budget.
+
+**Marginal-based synthesis.** MST (McKenna et al., 2021), the winner of the 2018 NIST DP synthetic data
+challenge, privately selects a maximum spanning tree of 2-way marginals, measures them with Gaussian
+noise, and fits a graphical model with Private-PGM. AIM (McKenna et al., 2022) adaptively selects
+marginals against a workload and is generally the strongest method on marginal-preservation
+benchmarks.
+
+**Deep DP synthesis.** DP-GAN variants clip and noise discriminator gradients. DP-CTGAN (Fang et al.,
+2022) applies this to CTGAN's conditional architecture (Xu et al., 2019). PATE-GAN (Jordon et al.,
+2019) trains teacher discriminators on disjoint partitions and a student on their noisy votes, and
+PATE-CTGAN (Rosenblatt et al., 2020) combines this with CTGAN. VAE-based synthesizers such as TVAE
+(Xu et al., 2019) can be trained with DP-SGD directly, since the whole model sees the data.
+
+**Benchmarks and auditing.** Tao et al. (2021) and Ganev and De Cristofaro compare graphical and deep
+DP synthesizers and generally favour marginal methods. Annamalai et al. (2024) show that tight
+auditing can expose gaps between claimed and actual privacy in synthetic data generators, and Ganev,
+Annamalai and De Cristofaro (TMLR 2025) find 19 privacy violations across six open-source PATE-GAN
+implementations. Similarity-based privacy metrics such as distance to closest record are known to be
+weak evidence of privacy; we use one only as a sanity check alongside formal DP.
 
 ## 3. Leakage-free evaluation protocol
 
