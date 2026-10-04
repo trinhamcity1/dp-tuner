@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +17,8 @@ RESULTS = os.path.join(HERE, "results.jsonl")
 FAILURES = os.path.join(HERE, "logs", "failures.jsonl")
 LOG = os.path.join(HERE, "logs", "run.log")
 JOB_TIMEOUT_S = 3 * 3600
+# AIM peaks at ~6 GB RSS; two at once exhausted the 16 GB container, so they run one at a time.
+AIM_LOCK = threading.Lock()
 
 DATASETS = ["adult", "diabetes130", "brfss"]
 EPSILONS = [1.0, 2.0, 4.0]
@@ -90,6 +93,13 @@ def log(msg):
 
 
 def run(job, threads):
+    if job[1] == "aim":
+        with AIM_LOCK:
+            return _run(job, threads)
+    return _run(job, threads)
+
+
+def _run(job, threads):
     ds, method, eps, seed = job
     if os.path.exists(os.path.join(HERE, "logs", "DRAIN")):
         return
