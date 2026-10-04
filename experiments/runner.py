@@ -53,13 +53,15 @@ def queue():
             for eps in EPSILONS:
                 jobs.append((ds, "dpvae_argmax", eps, seed))
     for ds in DATASETS:
-        for seed in range(3):
-            for eps in EPSILONS:
-                jobs.append((ds, "aim", eps, seed))
-    for ds in DATASETS:
         for seed in range(3, 10):
             for eps in EPSILONS:
                 jobs.append((ds, "dpvae_argmax", eps, seed))
+    # AIM's runtime grows steeply with epsilon (~27 min at eps=1, >2 h at eps=2 on Adult),
+    # so one seed per cell first and extra seeds only as time allows.
+    for seed in range(3):
+        for ds in DATASETS:
+            for eps in EPSILONS:
+                jobs.append((ds, "aim", eps, seed))
     return jobs
 
 
@@ -87,6 +89,8 @@ def log(msg):
 
 def run(job, threads):
     ds, method, eps, seed = job
+    if os.path.exists(os.path.join(HERE, "logs", "DRAIN")):
+        return
     t0 = time.time()
     env = dict(os.environ, TORCH_THREADS=str(threads), OMP_NUM_THREADS=str(threads))
     cmd = [sys.executable, os.path.join(HERE, "bench.py"), "--dataset", ds, "--method", method,
