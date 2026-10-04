@@ -60,8 +60,10 @@ def queue():
     # so one seed per cell first and extra seeds only as time allows.
     for seed in range(3):
         for ds in DATASETS:
-            for eps in EPSILONS:
-                jobs.append((ds, "aim", eps, seed))
+            jobs.append((ds, "aim", 1.0, seed))
+    for ds in DATASETS:
+        for eps in EPSILONS[1:]:
+            jobs.append((ds, "aim", eps, 0))
     return jobs
 
 
@@ -104,7 +106,7 @@ def run(job, threads):
                 f.write(out[-1][len("RESULT "):] + "\n")
             log(f"DONE  {key(*job)} {time.time() - t0:.0f}s")
             return
-        err = (p.stderr or "")[-2000:]
+        err = f"returncode={p.returncode} " + (p.stderr or "")[-2000:]
     except subprocess.TimeoutExpired:
         err = "timeout"
     with open(FAILURES, "a") as f:
