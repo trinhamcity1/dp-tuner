@@ -273,6 +273,13 @@ def main():
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--save-synth", default="")
     a = ap.parse_args()
+    skip_file = os.path.join(HERE, "skip_jobs.txt")
+    if os.path.exists(skip_file):
+        key = f"{a.dataset}|{a.method}|{float(a.eps)}|{int(a.seed)}"
+        patterns = [l.strip() for l in open(skip_file) if l.strip() and not l.startswith("#")]
+        if any(key.startswith(p) for p in patterns):
+            print(f"SKIPPED {key} (listed in skip_jobs.txt)", file=sys.stderr)
+            sys.exit(3)
 
     schema, train, test = load(a.dataset)
     t0 = time.time()
