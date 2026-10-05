@@ -180,7 +180,7 @@ TSTR AUROC, logistic regression (mean ± std over seeds):
 | DP-VAE + DP prior (ours) | 0.856 ± 0.006 | 0.884 ± 0.007 | 0.567 ± 0.014 | 0.574 ± 0.012 | 0.729 ± 0.011 | 0.727 ± 0.010 |
 | DP-VAE, N(0, I) prior | **0.877 ± 0.004** | **0.889 ± 0.006** | **0.570 ± 0.016** | **0.582 ± 0.012** | **0.733 ± 0.012** | **0.731 ± 0.010** |
 | MST | 0.761 ± 0.034 | 0.770 ± 0.019 | 0.522 ± 0.016 | 0.520 ± 0.009 | 0.585 ± 0.004 | 0.586 ± 0.004 |
-| AIM‡ | 0.824 (2 seeds) | – | – | – | – | – |
+| AIM‡ | 0.816 ± 0.019 (3 seeds) | – | – | – | – | – |
 | DP-CTGAN | 0.758 ± 0.045 | 0.785 ± 0.013 | 0.510 ± 0.037 | 0.515 ± 0.018 | 0.630 ± 0.035 | 0.642 ± 0.091 |
 | PATE-CTGAN | 0.460 ± 0.053 | 0.516 ± 0.060 | 0.529 ± 0.030 | 0.497 ± 0.011 | 0.509 ± 0.037 | 0.600 ± 0.025 |
 | *Non-private CTGAN* | *0.883* | | *0.521* | | *0.732* | |
@@ -200,7 +200,9 @@ Adult ε ≥ 2 retries are pending. See Limitations.
 - Plain DP-VAE beats PATE-CTGAN in 8 of 9 cells and DP-CTGAN in 7 of 9 at Holm-corrected α = 0.05.
   DP-VAE + prior does so in 7 and 5 of 9. In the remaining cells the mean difference still favours
   the VAE, but intervals are wide (5 GAN seeds).
-- On Adult at ε = 1, AIM's AUROC (0.824, 2 seeds) sits between MST and DP-VAE + prior (0.856).
+- On Adult at ε = 1, AIM's AUROC (0.816 ± 0.019, 3 seeds) sits between MST (0.761) and DP-VAE + prior
+  (0.856). The +0.041 gap to DP-VAE + prior is not significant with 3 paired seeds (Holm-corrected
+  p = 0.26).
 - At ε = 1, DP-VAE is within 0.01 of non-private CTGAN/TVAE on Adult and matches or exceeds them on
   BRFSS and Diabetes130. The non-private references use default hyperparameters, so this says the DP
   cost is small, not that DP-VAE is better than a tuned non-private model.
@@ -215,11 +217,11 @@ Mean marginal TVD (lower is better), ε = 1 / ε = 4:
 | DP-VAE + DP prior (ours) | 0.022 / 0.029 | 0.066 / 0.067 | 0.012 / 0.017 | **0.036 / 0.039** | 0.012 / 0.015 | **0.026 / 0.031** |
 | DP-VAE, N(0, I) prior | 0.055 / 0.082 | 0.119 / 0.141 | 0.028 / 0.061 | 0.062 / 0.104 | 0.053 / 0.065 | 0.087 / 0.107 |
 | MST | **0.003 / 0.001** | 0.093 / 0.091 | **0.002 / 0.001** | 0.111 / 0.110 | **0.000 / 0.000** | 0.101 / 0.101 |
-| AIM (ε = 1, 2 seeds) | 0.004 | **0.040** | – | – | – | – |
+| AIM (ε = 1, 3 seeds) | 0.004 | **0.040** | – | – | – | – |
 
 - **2-way marginals:** DP-VAE + DP prior beats MST in all nine cells, with 1.4–3.9× lower error
   (Holm-corrected p < 10⁻⁷). It beats plain DP-VAE in all nine, with 1.7–3.5× lower error. Where AIM
-  finished (Adult, ε = 1), AIM remains best (0.040 vs 0.066).
+  finished (Adult, ε = 1), AIM remains best (0.040 vs 0.065, 3 paired seeds, p = 0.014).
 - **1-way marginals:** MST and AIM, which measure every 1-way marginal directly, stay near-exact.
   The DP prior cuts DP-VAE's 1-way error 2.4–4.6× but does not close this gap.
 - **No degradation with ε.** With the N(0, I) prior, DP-VAE's fidelity gets worse as ε grows (Adult
