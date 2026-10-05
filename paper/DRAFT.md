@@ -190,7 +190,7 @@ TSTR AUROC, logistic regression (mean ± std over seeds):
 † Two of three TVAE seeds on Diabetes130 generated only the majority class (≈9% positive rate), so
 AUROC is undefined for them.
 ‡ AIM exceeded the 3-hour per-job limit (4 CPUs, 16 GB) at ε = 1 on Diabetes130 (twice) and BRFSS;
-on Adult at ε = 4 it also timed out running alone (ε = 2 pending). See Limitations.
+on Adult it did not finish at ε = 4 (3-hour limit, running alone) or ε = 2 (no result after 2 h 48 min). See Limitations.
 
 - DP-VAE + DP prior beats MST in all nine (dataset, ε) cells, by +0.045 to +0.144 AUROC (10 paired
   seeds; Holm-corrected p ≤ 0.007 everywhere). Plain DP-VAE's margin is slightly larger: +0.048 to
@@ -275,7 +275,7 @@ Mean fit-plus-sample time on 4 CPU cores: MST 49–92 s, DP-VAE 382–652 s, DP-
 (some runs shared the CPU with AIM), DP-CTGAN 395–550 s, PATE-CTGAN 233–955 s. AIM took 22–27
 minutes on Adult at ε = 1 and peaked at about 6 GB of memory. At ε = 1 it hit the 3-hour limit on
 Diabetes130 (twice) and on BRFSS. On Adult at ε = 4 it hit the limit
-even when running alone (ε = 2 retry pending). The VAE methods run on CPU in minutes.
+even when running alone, and at ε = 2 it had not finished after 2 h 48 min. The VAE methods run on CPU in minutes.
 
 ## 6. An implementation flaw in smartnoise-synth PATE-CTGAN
 
