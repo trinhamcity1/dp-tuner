@@ -1,3 +1,5 @@
 # Jobs skipped for compute reasons (prefix match on dataset|method|eps|seed)
 # AIM on Diabetes130 (28 columns) exceeded the 3 h per-job limit at eps=1 on 4 CPUs / 16 GB.
 diabetes130|aim|
+# AIM on BRFSS (22 columns, 189k rows) exceeded the 3 h limit at eps=1.
+brfss|aim|

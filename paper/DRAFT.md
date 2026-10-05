@@ -189,8 +189,8 @@ TSTR AUROC, logistic regression (mean ± std over seeds):
 
 † Two of three TVAE seeds on Diabetes130 generated only the majority class (≈9% positive rate), so
 AUROC is undefined for them.
-‡ AIM exceeded the 3-hour per-job limit (4 CPUs, 16 GB) on Diabetes130 at ε = 1; Adult ε ≥ 2 and
-BRFSS runs are pending. See Limitations.
+‡ AIM exceeded the 3-hour per-job limit (4 CPUs, 16 GB) at ε = 1 on Diabetes130 (twice) and BRFSS;
+Adult ε ≥ 2 retries are pending. See Limitations.
 
 - DP-VAE + DP prior beats MST in all nine (dataset, ε) cells, by +0.045 to +0.144 AUROC (10 paired
   seeds; Holm-corrected p ≤ 0.007 everywhere). Plain DP-VAE's margin is slightly larger: +0.048 to
@@ -271,8 +271,8 @@ canaries (Annamalai et al. 2024) is future work.
 
 Mean fit-plus-sample time on 4 CPU cores: MST 49–92 s, DP-VAE 382–652 s, DP-VAE + DP prior 488–814 s
 (some runs shared the CPU with AIM), DP-CTGAN 395–550 s, PATE-CTGAN 233–955 s. AIM took 22–27
-minutes on Adult at ε = 1 and peaked at about 6 GB of memory. On Diabetes130 at ε = 1 it hit the
-3-hour limit twice. On Adult at ε ≥ 2 its first attempts ran out of memory or time while sharing the
+minutes on Adult at ε = 1 and peaked at about 6 GB of memory. At ε = 1 it hit the 3-hour limit on
+Diabetes130 (twice) and on BRFSS. On Adult at ε ≥ 2 its first attempts ran out of memory or time while sharing the
 machine with a second AIM job; solo retries are queued. The VAE methods run on CPU in minutes.
 
 ## 6. An implementation flaw in smartnoise-synth PATE-CTGAN
@@ -306,7 +306,8 @@ the latest release, run a canary-based audit, and disclose to the maintainers.
   (MST, AIM) and limits fidelity on continuous attributes.
 - **AIM coverage.** AIM's model size is capped at 20 MB for CPU tractability, which may understate
   its performance. Even so, it exceeded our 3-hour per-job limit on 4 CPUs / 16 GB in most settings,
-  so we report it only where it finished (Adult, ε = 1, 2 seeds; BRFSS pending). On those cells it
+  so we report it only where it finished (Adult, ε = 1). Its runtime grows with both the number of
+columns (Diabetes130 has 28) and ε, while the VAE's runtime is set by the fixed DP-SGD step budget. On those cells it
   has the best 2-way fidelity of any method, and a fair reading of our results is that AIM leads on
   low-order marginals while DP-VAE + prior leads on downstream utility.
 - **Single split and moderate seed counts.** Seeds vary the mechanism's randomness, not the data
