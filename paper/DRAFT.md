@@ -1,4 +1,4 @@
-# Sampling, Not Argmax: A Leakage-Free Benchmark Showing DP-VAEs Beat Marginal and GAN Synthesizers on Downstream Utility
+# Fixing the Sampler: Likelihood Decoding and a DP Latent Prior Make DP-VAEs Competitive Tabular Synthesizers
 
 *Working draft — target venues: DPLICIT 2027 workshop, PETS 2027. All numbers come from
 `experiments/results_snapshot.jsonl` via `experiments/make_tables.py` and `experiments/analyze.py`;
@@ -10,17 +10,19 @@ Differentially private (DP) synthetic tabular data is usually evaluated with pip
 data-dependent preprocessors (quantile transforms, observed category sets, class priors) outside the
 privacy budget, which both leaks information and makes methods incomparable. We build a leakage-free
 benchmark in which every method receives the same table discretized over public codebook domains and
-spends its entire budget inside the mechanism. On three public health and census datasets (Adult,
-Diabetes130-US, BRFSS 2021; 39k–189k training rows) at ε ∈ {1, 2, 4}, δ = 10⁻⁶, a conditional
-variational autoencoder trained with DP-SGD (DP-VAE) beats MST on train-on-synthetic/test-on-real
-AUROC in all nine settings (+0.05 to +0.15 AUROC; Holm-corrected p ≤ 0.008, 10 paired seeds), and
-beats DP-SGD and PATE-based CTGAN variants. At ε = 1 its utility matches that of non-private CTGAN and
-TVAE. A single design choice drives much of this: decoding categorical columns by sampling from the decoder's
-likelihood instead of taking the argmax, which costs 0.02–0.12 AUROC and multiplies 2-way marginal
-error 2–7× when omitted. MST keeps an advantage on one-way marginals, so the result is a
-utility/fidelity trade-off rather than uniform dominance. A distance-to-closest-record membership
-attack finds no detectable leakage for any DP method (mean AUC 0.494–0.512, versus 0.56–0.66 when the
-training data itself is released). Finally, we find that the widely used smartnoise-synth PATE-CTGAN
+spends its entire budget inside the mechanism. Within it, we show that a conditional variational
+autoencoder trained with DP-SGD (DP-VAE) is held back not by training but by how it *samples*. Two
+fixes recover most of what is lost. (i) Categorical columns are drawn from the decoder's likelihood
+rather than decoded by argmax. (ii) A DP latent prior: a Gaussian fit to the aggregate posterior,
+released once with the analytic Gaussian mechanism for 5% of the budget, replaces N(0, I) at sampling
+time. We evaluate on Adult, Diabetes130-US and BRFSS 2021 (39k–189k training rows) at ε ∈ {1, 2, 4},
+δ = 10⁻⁶, with 10 paired seeds. The resulting DP-VAE + prior beats MST on both train-on-synthetic /
+test-on-real AUROC (+0.045 to +0.144) and 2-way marginal error (1.4–3.9× lower) in all nine settings
+(Holm-corrected p ≤ 0.007). Compared with plain DP-VAE, it cuts 2-way error 1.7–3.5× at a utility cost
+of at most 0.021 AUROC, and its fidelity no longer degrades as ε grows. MST keeps the edge on one-way
+marginals, and AIM on low-order marginals where it is tractable. A distance-to-closest-record
+membership attack finds no detectable leakage for any DP method (AUC 0.49–0.51, versus 0.56–0.66 when
+the training data itself is released). We also find that the smartnoise-synth PATE-CTGAN
 implementation shares one discriminator object between all teachers and the student, so its PATE
 privacy analysis does not apply as implemented.
 
@@ -49,19 +51,24 @@ implementations often emit the argmax at sampling time. Under DP noise the decod
 the argmax collapses columns toward their modes. That destroys the marginals and the label–feature
 dependencies a downstream classifier needs.
 
-With both issues fixed, a simple conditional VAE trained with DP-SGD becomes a strong baseline. Our
+Third, **the sampling prior.** Even with likelihood decoding, a DP-VAE's marginal fidelity gets
+*worse* as the budget grows. We trace this to a mismatch between the N(0, I) prior used at sampling
+time and the aggregate posterior the encoder actually learned. The mismatch can be fixed privately
+and cheaply.
+
+With these issues fixed, a conditional VAE trained with DP-SGD becomes a strong DP synthesizer. Our
 contributions are:
 
 1. A leakage-free evaluation protocol and an open, restart-safe benchmark harness, in which every
    method receives the same public-domain table and spends its whole budget inside the mechanism
    (Section 3).
-2. A controlled comparison on three public datasets at three budgets, with 10 paired seeds and
-   multiplicity-corrected tests. DP-VAE beats MST on TSTR AUROC in every setting and beats DP GAN
-   baselines in most, at modest CPU cost (Section 5.1).
-3. A characterisation of the trade-off: marginal methods remain better at reproducing low-order
-   marginals, while DP-VAE preserves more predictive signal (Section 5.2).
-4. An ablation (10 seeds) showing that sampling, rather than argmax decoding, accounts for much of
-   DP-VAE's advantage (Section 5.3).
+2. A DP latent prior: a one-shot Gaussian-mechanism release of the aggregate posterior's mean and
+   covariance (Section 4). It halves or better DP-VAE's 2-way marginal error at a small utility cost.
+3. A controlled comparison on three public datasets at three budgets, with 10 paired seeds and
+   multiplicity-corrected tests. DP-VAE + prior beats MST on both TSTR AUROC and 2-way marginal error
+   in every setting, and beats DP GAN baselines (Sections 5.1–5.2).
+4. Ablations (10 seeds) isolating both sampling fixes: likelihood vs argmax decoding, and DP prior vs
+   N(0, I) (Section 5.3), with a diagnostic explaining why fidelity degraded with ε.
 5. An empirical membership-inference check (Section 5.4), and an implementation flaw in a widely used
    PATE-CTGAN library that invalidates its privacy analysis (Section 6).
 
@@ -108,8 +115,9 @@ weak evidence of privacy; we use one only as a sanity check alongside formal DP.
   same accountant used to report spent ε (spent ε within 1% of target in every run).
 - **Fixed optimisation budget.** DP-SGD methods take 2,000 steps with batch 512 and clip norm 1.6 on
   every dataset (epochs = steps / ⌊n/512⌋). Non-private references take 5,000 steps.
-- **Splits and seeds.** One stratified 80/20 train/test split per dataset (seed 7). DP-VAE and MST:
-  10 seeds; DP-CTGAN and PATE-CTGAN: 5 seeds; non-private references and ablation: 3 seeds.
+- **Splits and seeds.** One stratified 80/20 train/test split per dataset (seed 7). DP-VAE (both
+  priors), MST and the decoding ablation: 10 seeds; DP-CTGAN and PATE-CTGAN: 5 seeds; non-private
+  references: 3 seeds; AIM: as many as finished (see Limitations).
 
 ### Metrics
 
@@ -124,11 +132,12 @@ weak evidence of privacy; we use one only as a sanity check alongside formal DP.
 
 | Method | Type | Implementation |
 |---|---|---|
-| DP-VAE (ours) | Conditional VAE, DP-SGD | `dp_synth_data_gen/dptvae.py`, Opacus 1.6 |
+| DP-VAE + DP prior (ours) | Conditional VAE, DP-SGD, DP latent prior | `dp_synth_data_gen/dptvae.py` (`fit_latent_prior`), Opacus 1.6 |
+| DP-VAE (ours, ablation) | Conditional VAE, DP-SGD, N(0, I) prior | `dp_synth_data_gen/dptvae.py`, Opacus 1.6 |
 | DP-CTGAN | Conditional GAN, DP-SGD discriminator, Gumbel-softmax generator | `dp_synth_data_gen/dpctgan_v2.py` |
 | PATE-CTGAN | GAN with PATE teacher ensemble | smartnoise-synth 1.0.8 |
 | MST | Marginal-based (maximum spanning tree + Private-PGM) | smartnoise-synth 1.0.8 |
-| AIM | Workload-adaptive marginal-based | smartnoise-synth 1.0.8, model size capped at 20 MB (*runs pending*) |
+| AIM | Workload-adaptive marginal-based | smartnoise-synth 1.0.8, model size capped at 20 MB |
 | CTGAN, TVAE | Non-private references | SDV |
 
 **DP-VAE.** Encoder and decoder MLPs (256–128), 16-d latent space, conditioned on the one-hot label,
@@ -168,8 +177,10 @@ TSTR AUROC, logistic regression (mean ± std over seeds):
 
 | Method | Adult ε=1 | Adult ε=4 | Diabetes130 ε=1 | Diabetes130 ε=4 | BRFSS ε=1 | BRFSS ε=4 |
 |---|---|---|---|---|---|---|
-| DP-VAE (ours) | **0.877 ± 0.004** | **0.889 ± 0.006** | **0.570 ± 0.016** | **0.582 ± 0.012** | **0.733 ± 0.012** | **0.731 ± 0.010** |
+| DP-VAE + DP prior (ours) | 0.856 ± 0.006 | 0.884 ± 0.007 | 0.567 ± 0.014 | 0.574 ± 0.012 | 0.729 ± 0.011 | 0.727 ± 0.010 |
+| DP-VAE, N(0, I) prior | **0.877 ± 0.004** | **0.889 ± 0.006** | **0.570 ± 0.016** | **0.582 ± 0.012** | **0.733 ± 0.012** | **0.731 ± 0.010** |
 | MST | 0.761 ± 0.034 | 0.770 ± 0.019 | 0.522 ± 0.016 | 0.520 ± 0.009 | 0.585 ± 0.004 | 0.586 ± 0.004 |
+| AIM‡ | 0.824 (2 seeds) | – | – | – | – | – |
 | DP-CTGAN | 0.758 ± 0.045 | 0.785 ± 0.013 | 0.510 ± 0.037 | 0.515 ± 0.018 | 0.630 ± 0.035 | 0.642 ± 0.091 |
 | PATE-CTGAN | 0.460 ± 0.053 | 0.516 ± 0.060 | 0.529 ± 0.030 | 0.497 ± 0.011 | 0.509 ± 0.037 | 0.600 ± 0.025 |
 | *Non-private CTGAN* | *0.883* | | *0.521* | | *0.732* | |
@@ -178,32 +189,49 @@ TSTR AUROC, logistic regression (mean ± std over seeds):
 
 † Two of three TVAE seeds on Diabetes130 generated only the majority class (≈9% positive rate), so
 AUROC is undefined for them.
+‡ AIM exceeded the 3-hour per-job limit (4 CPUs, 16 GB) on Diabetes130 at ε = 1; Adult ε ≥ 2 and
+BRFSS runs are pending. See Limitations.
 
-- DP-VAE beats MST in all nine (dataset, ε) cells: +0.116 to +0.131 on Adult, +0.048 to +0.062 on
-  Diabetes130, +0.145 to +0.147 on BRFSS (10 paired seeds; Holm-corrected p ≤ 0.008 everywhere).
-- DP-VAE beats PATE-CTGAN in 8 of 9 cells and DP-CTGAN in 7 of 9 at Holm-corrected α = 0.05; in the
-  remaining cells the mean difference still favours DP-VAE (+0.05 to +0.12) but intervals are wide
-  (5 seeds).
+- DP-VAE + DP prior beats MST in all nine (dataset, ε) cells, by +0.045 to +0.144 AUROC (10 paired
+  seeds; Holm-corrected p ≤ 0.007 everywhere). Plain DP-VAE's margin is slightly larger: +0.048 to
+  +0.147, Holm-corrected p ≤ 0.008.
+- The DP prior costs at most 0.021 AUROC relative to plain DP-VAE (largest on Adult at ε = 1; the
+  difference is significant in 4 of 9 cells and below 0.01 in 7 of 9).
+- Plain DP-VAE beats PATE-CTGAN in 8 of 9 cells and DP-CTGAN in 7 of 9 at Holm-corrected α = 0.05.
+  DP-VAE + prior does so in 7 and 5 of 9. In the remaining cells the mean difference still favours
+  the VAE, but intervals are wide (5 GAN seeds).
+- On Adult at ε = 1, AIM's AUROC (0.824, 2 seeds) sits between MST and DP-VAE + prior (0.856).
 - At ε = 1, DP-VAE is within 0.01 of non-private CTGAN/TVAE on Adult and matches or exceeds them on
   BRFSS and Diabetes130. The non-private references use default hyperparameters, so this says the DP
   cost is small, not that DP-VAE is better than a tuned non-private model.
 - Gradient-boosting AUROC shows the same ordering (`paper/tables.md`).
 
-### 5.2 Fidelity: a trade-off with MST
+### 5.2 Fidelity
 
-- **1-way marginals:** MST is near-exact (TVD ≤ 0.003), as it measures every 1-way marginal directly;
-  DP-VAE's error is 0.03–0.08.
-- **2-way marginals:** mixed. MST is better on Adult (0.091–0.093 vs 0.119–0.141). DP-VAE is better on
-  Diabetes130 at ε = 1, 2 (0.062 vs 0.111; 0.084 vs 0.110) and on BRFSS at ε = 1 (0.087 vs 0.101).
-  The other cells show no significant difference.
-- **DP-VAE fidelity worsens as ε grows** on every dataset (e.g. Adult 1-way TVD 0.055 → 0.082 from
-  ε = 1 to 4), while utility rises or stays flat. Hypothesis to test: with less gradient noise the
-  aggregate posterior drifts from the N(0, I) prior used at sampling time, and the decoder's
-  per-column softmaxes become sharper and less calibrated.
+Mean marginal TVD (lower is better), ε = 1 / ε = 4:
+
+| Method | Adult 1-way | Adult 2-way | Diabetes130 1-way | Diabetes130 2-way | BRFSS 1-way | BRFSS 2-way |
+|---|---|---|---|---|---|---|
+| DP-VAE + DP prior (ours) | 0.022 / 0.029 | 0.066 / 0.067 | 0.012 / 0.017 | **0.036 / 0.039** | 0.012 / 0.015 | **0.026 / 0.031** |
+| DP-VAE, N(0, I) prior | 0.055 / 0.082 | 0.119 / 0.141 | 0.028 / 0.061 | 0.062 / 0.104 | 0.053 / 0.065 | 0.087 / 0.107 |
+| MST | **0.003 / 0.001** | 0.093 / 0.091 | **0.002 / 0.001** | 0.111 / 0.110 | **0.000 / 0.000** | 0.101 / 0.101 |
+| AIM (ε = 1, 2 seeds) | 0.004 | **0.040** | – | – | – | – |
+
+- **2-way marginals:** DP-VAE + DP prior beats MST in all nine cells, with 1.4–3.9× lower error
+  (Holm-corrected p < 10⁻⁷). It beats plain DP-VAE in all nine, with 1.7–3.5× lower error. Where AIM
+  finished (Adult, ε = 1), AIM remains best (0.040 vs 0.066).
+- **1-way marginals:** MST and AIM, which measure every 1-way marginal directly, stay near-exact.
+  The DP prior cuts DP-VAE's 1-way error 2.4–4.6× but does not close this gap.
+- **No degradation with ε.** With the N(0, I) prior, DP-VAE's fidelity gets worse as ε grows (Adult
+  2-way 0.119 → 0.141). With the DP prior it is flat (0.066 → 0.067). This matches the diagnostic in
+  Section 4: the aggregate posterior drifts further from N(0, I) as DP-SGD noise falls (mean |μ| 0.33
+  at ε = 1 vs 0.65 at ε = 4 on Adult), and the DP prior tracks the drift.
 - Both GAN baselines have poor marginals (2-way TVD 0.2–0.68), which is consistent with mode collapse
   under DP.
 
-### 5.3 Ablation: categorical decoding
+### 5.3 Ablations
+
+**Categorical decoding.**
 
 Same model and training; only the decoding rule changes (10 paired seeds per cell, ε = 1 shown):
 
@@ -220,8 +248,14 @@ its advantage over MST on Adult and Diabetes130. Sampling is the decoding rule t
 model's own likelihood, so we recommend it as the default for any VAE-style tabular synthesizer.
 
 The argmax gap narrows as ε grows (e.g. Adult 2-way TVD gap 0.30 → 0.15 from ε = 1 to 4): with less
-noise the decoder is more confident and the argmax discards less. This is consistent with the
-DP-VAE fidelity trend in Section 5.2.
+noise the decoder is more confident and the argmax discards less.
+
+**Sampling prior.** The comparison of DP-VAE + DP prior with plain DP-VAE in Sections 5.1–5.2 is
+itself an ablation of the prior, since the training is identical apart from moving 5% of ε from
+DP-SGD to the prior release. Fidelity improves in all nine cells, and utility changes by
+−0.021 to +0.001 AUROC. In a non-private diagnostic (Adult, seed 0), a 10-component Gaussian mixture
+fit to the aggregate posterior reaches 2-way TVD 0.059 / 0.049 at ε = 1 / 4, against 0.065 / 0.066
+for a single Gaussian. A private mixture is therefore a natural next step for higher budgets.
 
 ### 5.4 Empirical privacy check
 
@@ -235,8 +269,11 @@ canaries (Annamalai et al. 2024) is future work.
 
 ### 5.5 Cost
 
-Mean fit-plus-sample time on 4 CPU cores: MST 49–92 s, DP-VAE 382–652 s, DP-CTGAN 395–550 s,
-PATE-CTGAN 233–955 s. DP-VAE is roughly 7–13× slower than MST but runs on CPU in minutes.
+Mean fit-plus-sample time on 4 CPU cores: MST 49–92 s, DP-VAE 382–652 s, DP-VAE + DP prior 488–814 s
+(some runs shared the CPU with AIM), DP-CTGAN 395–550 s, PATE-CTGAN 233–955 s. AIM took 22–27
+minutes on Adult at ε = 1 and peaked at about 6 GB of memory. On Diabetes130 at ε = 1 it hit the
+3-hour limit twice. On Adult at ε ≥ 2 its first attempts ran out of memory or time while sharing the
+machine with a second AIM job; solo retries are queued. The VAE methods run on CPU in minutes.
 
 ## 6. An implementation flaw in smartnoise-synth PATE-CTGAN
 
@@ -267,8 +304,11 @@ the latest release, run a canary-based audit, and disclose to the maintainers.
   hyperparameter search (e.g. Papernot & Steinke 2022) is future work.
 - **Categorical-only protocol.** Discretising numeric columns favours methods built for discrete data
   (MST, AIM) and limits fidelity on continuous attributes.
-- **AIM model size.** AIM's model size is capped at 20 MB for CPU tractability, which may understate
-  its performance (*AIM results pending*).
+- **AIM coverage.** AIM's model size is capped at 20 MB for CPU tractability, which may understate
+  its performance. Even so, it exceeded our 3-hour per-job limit on 4 CPUs / 16 GB in most settings,
+  so we report it only where it finished (Adult, ε = 1, 2 seeds; BRFSS pending). On those cells it
+  has the best 2-way fidelity of any method, and a fair reading of our results is that AIM leads on
+  low-order marginals while DP-VAE + prior leads on downstream utility.
 - **Single split and moderate seed counts.** Seeds vary the mechanism's randomness, not the data
   split.
 - **The privacy check is heuristic** (Section 5.4).
